@@ -23,6 +23,8 @@ export interface WorkerDeps {
   /** Observation window before an outcome is evaluated. */
   observationDays: number;
   maxProposalsPerTick: number;
+  /** Appendix B readiness; Autopilot writes stay blocked until it passes. */
+  readiness: (c: PoolClient, orgId: string) => Promise<import("@quietgrowth/domain").Readiness>;
   notify?: (orgId: string, kind: string, body: Record<string, unknown>) => Promise<void>;
 }
 

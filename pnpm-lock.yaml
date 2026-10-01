@@ -41,6 +41,9 @@ importers:
       '@quietgrowth/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@quietgrowth/entitlements':
+        specifier: workspace:*
+        version: link:../../packages/entitlements
       '@quietgrowth/experiments':
         specifier: workspace:*
         version: link:../../packages/experiments
@@ -346,6 +349,8 @@ importers:
         version: 8.23.1
 
   packages/domain: {}
+
+  packages/entitlements: {}
 
   packages/experiments: {}
 

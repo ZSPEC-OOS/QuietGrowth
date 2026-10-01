@@ -28,6 +28,7 @@ describe.skipIf(!url)("worker handlers (postgres)", () => {
     verifier: { verify: async () => ({ ok: true, checks: [{ name: "pr", ok: true }] }) },
     outcomes: { evaluate: async () => ({ label: "observational", summary: { signupsDelta: 2 }, guardrailsHeld: true }) },
     scopeFor: (a) => `action:${a.id}`,
+    readiness: async () => ({ ready: true, rows: [], blocking: [] }),
   });
   const billing: RevenueEvent[] = [
     { providerEventId: "e1", kind: "subscription_started", customerId: "c1", subscriptionId: "s1", amountCents: 0, occurredAt: 1_000, mrrCents: 2900, plan: "pro" },
@@ -76,6 +77,15 @@ describe.skipIf(!url)("worker handlers (postgres)", () => {
     now += 15 * 86_400_000;
     expect((await evaluateDue(mk(), orgA)).evaluated).toBe(1);
     expect((await pool.query("SELECT status FROM actions WHERE organization_id=$1", [orgA])).rows[0].status).toBe("EVALUATED");
+  });
+
+  it("blocks all writes until the Appendix B readiness checklist passes", async () => {
+    const org = (await pool.query("INSERT INTO organizations (name) VALUES ('NR') RETURNING id")).rows[0].id;
+    await detectAndPropose(mk(), org);
+    const before = executed;
+    const r = await executeReady({ ...mk(), readiness: async () => ({ ready: false, rows: [], blocking: ["Billing"] }) }, org);
+    expect(r).toMatchObject({ ran: 0, notReady: ["Billing"] }); expect(executed).toBe(before);
+    expect((await pool.query("SELECT status FROM actions WHERE organization_id=$1", [org])).rows[0].status).toBe("AUTO_APPROVED");
   });
 
   it("executor failures are recorded as FAILED and do not stop the batch", async () => {

@@ -2,6 +2,7 @@ import pg from "pg";
 import { Redis } from "ioredis";
 import { createQueue, createWorker, enqueueTick } from "./queue.js";
 import type { WorkerDeps } from "./ports.js";
+import { loadReadiness } from "@quietgrowth/growth-engine";
 
 const need = (k: string): string => { const v = process.env[k]; if (!v) throw new Error(`${k} is required`); return v; };
 
@@ -17,6 +18,7 @@ const deps: WorkerDeps = {
   verifier: { verify: async () => ({ ok: false, checks: [{ name: "verifier_not_configured", ok: false }] }) },
   outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) },
   scopeFor: (a) => `action:${a.id}`, observationDays: 14, maxProposalsPerTick: 3,
+  readiness: (c, orgId) => loadReadiness(c, orgId, { now: Date.now, runtimeAttested: process.env.RUNTIME_ATTESTED === "1", verifierAvailable: false }),
 };
 createWorker(redis, deps);
 const queue = createQueue(redis);

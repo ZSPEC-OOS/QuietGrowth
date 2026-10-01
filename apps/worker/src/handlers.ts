@@ -100,9 +100,11 @@ export async function detectAndPropose(d: WorkerDeps, orgId: string): Promise<{ 
 }
 
 /** Execute AUTO_APPROVED and approved actions, respecting the model cap and policy version bindings. */
-export async function executeReady(d: WorkerDeps, orgId: string): Promise<{ ran: number; succeeded: number; failed: number; paused?: boolean }> {
+export async function executeReady(d: WorkerDeps, orgId: string): Promise<{ ran: number; succeeded: number; failed: number; paused?: boolean; notReady?: string[] }> {
   return withOrg(d.pool, orgId, async (c) => {
     if (await modelCapReached(c, orgId)) return { ran: 0, succeeded: 0, failed: 0, paused: true };
+    const rd = await d.readiness(c, orgId);
+    if (!rd.ready) return { ran: 0, succeeded: 0, failed: 0, notReady: rd.blocking }; // MR Appendix B: no writes until ready
     const engine = engineFor(d, c);
     const ready = (await c.query("SELECT id FROM actions WHERE organization_id=$1 AND status IN ('AUTO_APPROVED','APPROVED') ORDER BY created_at LIMIT 20", [orgId])).rows;
     const out = { ran: 0, succeeded: 0, failed: 0 };

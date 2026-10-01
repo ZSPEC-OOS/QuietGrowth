@@ -10,6 +10,10 @@ import { ingestEvents, resolvedEvents } from "@quietgrowth/connector-product-eve
 import { GrowthEngine, PgActionStore, EngineError, type ActionRecord, type Executor, type OutcomeEvaluator, type Verifier } from "@quietgrowth/growth-engine";
 import { ZERO_SPEND_POLICY, ACTION_TYPES, type Policy } from "@quietgrowth/policy-engine";
 import { validateSpec, type ExperimentSpec } from "@quietgrowth/experiments";
+import { randomUUID } from "node:crypto";
+import { assertCanAddProduct, assertFeature, assertModelCap, EntitlementError } from "@quietgrowth/entitlements";
+import { loadReadiness } from "@quietgrowth/growth-engine";
+import { assignVariant } from "@quietgrowth/experiments";
 import { runTool } from "./tools.js";
 import { ToolDeniedError } from "@quietgrowth/runtime-manager";
 import { hashApiKey, hashPassword, newApiKey, signSession, verifyPassword, verifySession, type Role, type Session } from "./auth.js";
@@ -52,6 +56,7 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
 
   app.setErrorHandler((err: Error, _req, reply) => {
     if (err instanceof z.ZodError) return reply.code(400).send({ error: "invalid_request", issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
+    if (err instanceof EntitlementError) return reply.code(402).send({ error: "plan_limit", message: err.message });
     if (err instanceof EngineError) return reply.code(409).send({ error: "conflict", message: err.message });
     if (err instanceof ToolDeniedError) return reply.code(403).send({ error: "tool_denied", message: err.message });
     if (err instanceof UnsafeUrlError) return reply.code(422).send({ error: "unsafe_url", message: err.message });
@@ -77,6 +82,8 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
   };
   const tenant = <T>(s: Session, fn: (c: PoolClient) => Promise<T>) => withOrg(d.pool, s.orgId, fn);
 
+  const tierFor = async (c: PoolClient, orgId: string): Promise<string> => ((await c.query("SELECT tier FROM subscriptions WHERE organization_id=$1 ORDER BY created_at DESC LIMIT 1", [orgId])).rows[0]?.tier as string) ?? "hosted_starter";
+
   const currentPolicy = async (c: PoolClient, orgId: string): Promise<Policy> => {
     const r = await c.query("SELECT policy FROM policy_versions WHERE organization_id=$1 ORDER BY created_at DESC, id DESC LIMIT 1", [orgId]);
     return (r.rows[0]?.policy as Policy) ?? ZERO_SPEND_POLICY;
@@ -97,11 +104,15 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
       await c.query("BEGIN");
       const u = await c.query("INSERT INTO users (email, password_hash) VALUES ($1,$2) ON CONFLICT (email) DO NOTHING RETURNING id", [b.email, hash]);
       if (!u.rows[0]) { await c.query("ROLLBACK"); return reply.code(409).send({ error: "email_taken" }); }
-      const o = await c.query("INSERT INTO organizations (name) VALUES ($1) RETURNING id", [b.orgName]);
-      await c.query("INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1,$2,'owner')", [o.rows[0].id, u.rows[0].id]);
+      // Bind the new tenant first so forced row-level security also holds for a non-superuser owner role.
+      const orgId = randomUUID();
+      await c.query("SELECT set_config('app.org_id', $1, true)", [orgId]);
+      await c.query("INSERT INTO organizations (id, name) VALUES ($1,$2)", [orgId, b.orgName]);
+      await c.query("INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1,$2,'owner')", [orgId, u.rows[0].id]);
+      await c.query("INSERT INTO subscriptions (organization_id, tier) VALUES ($1,'hosted_starter')", [orgId]);
       await c.query("COMMIT");
-      const s: Session = { userId: u.rows[0].id, orgId: o.rows[0].id, role: "owner", exp: now() + 12 * 3600_000 };
-      return reply.code(201).send({ token: signSession(s, d.sessionSecret), orgId: s.orgId });
+      const s: Session = { userId: u.rows[0].id, orgId, role: "owner", exp: now() + 12 * 3600_000 };
+      return reply.code(201).send({ token: signSession(s, d.sessionSecret), orgId });
     } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
   });
 
@@ -110,7 +121,7 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     const u = (await d.adminPool.query("SELECT id, password_hash FROM users WHERE email=$1", [b.email])).rows[0];
     const ok = await verifyPassword(b.password, u?.password_hash ?? null);
     if (!u || !ok) return reply.code(401).send({ error: "invalid_credentials" });
-    const m = (await d.adminPool.query("SELECT organization_id, role FROM organization_members WHERE user_id=$1 ORDER BY created_at LIMIT 1", [u.id])).rows[0];
+    const m = (await d.adminPool.query("SELECT organization_id, role FROM qg_memberships_for_user($1) LIMIT 1", [u.id])).rows[0];
     if (!m) return reply.code(403).send({ error: "no_organization" });
     return { token: signSession({ userId: u.id, orgId: m.organization_id, role: m.role, exp: now() + 12 * 3600_000 }, d.sessionSecret), orgId: m.organization_id };
   });
@@ -122,6 +133,7 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     const page = await safeFetch(b.url, { resolve: d.resolver, fetchImpl: d.fetchImpl });
     const profile = analyzeHtml(page.body);
     const out = await tenant(s, async (c) => {
+      assertCanAddProduct(await tierFor(c, s.orgId), (await c.query("SELECT count(*)::int n FROM products WHERE organization_id=$1", [s.orgId])).rows[0].n);
       const p = await c.query("INSERT INTO products (organization_id, name, primary_url) VALUES ($1,$2,$3) RETURNING id", [s.orgId, b.name ?? profile.name ?? new URL(page.finalUrl).hostname, page.finalUrl]);
       const v = (await c.query("SELECT COALESCE(max(version),0)+1 AS v FROM product_profiles WHERE product_id=$1", [p.rows[0].id])).rows[0].v;
       await c.query("INSERT INTO product_profiles (organization_id, product_id, version, profile, evidence) VALUES ($1,$2,$3,$4,$5)", [s.orgId, p.rows[0].id, v, profile, JSON.stringify(profile.evidence)]);
@@ -293,6 +305,9 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     if (b.mode === "zero_spend" && loosening.length) return reply.code(422).send({ error: "zero_spend_cannot_loosen_denials", types: loosening.map(([k]) => k) });
     const policy: Policy = { ...ZERO_SPEND_POLICY, mode: b.mode, maxExternalSpendUsd: b.maxExternalSpendUsd, maxModelSpendUsd: b.maxModelSpendUsd, limits: { maxActionsPerDay: b.maxActionsPerDay }, rules: { ...ZERO_SPEND_POLICY.rules, ...b.rules } };
     const version = await tenant(s, async (c) => {
+      const tier = await tierFor(c, s.orgId);
+      if (b.mode === "controlled_growth") assertFeature(tier, "controlledGrowthMode");
+      assertModelCap(tier, b.maxModelSpendUsd);
       const n = (await c.query("SELECT count(*)::int+1 AS n FROM policy_versions WHERE organization_id=$1", [s.orgId])).rows[0].n;
       const label = `${b.mode}.v${n}`;
       await c.query("INSERT INTO policy_versions (organization_id, version, policy) VALUES ($1,$2,$3)", [s.orgId, label, { ...policy, version: label }]);
@@ -340,6 +355,81 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
   app.get("/v1/integrations", async (req) => {
     const s = await requireSession(req);
     return tenant(s, async (c) => ({ integrations: (await c.query("SELECT provider, status, scopes, last_sync_at FROM integrations WHERE organization_id=$1 ORDER BY provider", [s.orgId])).rows }));
+  });
+
+  // ---- readiness / product confirmation ----
+  app.get("/v1/readiness", async (req) => {
+    const s = await requireSession(req);
+    return tenant(s, (c) => loadReadiness(c, s.orgId, { now, verifierAvailable: false, runtimeAttested: false }));
+  });
+  app.post("/v1/product/confirm", async (req, reply) => {
+    const s = await requireSession(req, "admin");
+    const r = await tenant(s, (c) => c.query(`UPDATE product_profiles SET status='confirmed' WHERE id = (SELECT pp.id FROM product_profiles pp JOIN products p ON p.id=pp.product_id WHERE p.organization_id=$1 ORDER BY pp.version DESC LIMIT 1) RETURNING id`, [s.orgId]));
+    return r.rowCount ? { confirmed: true } : reply.code(404).send({ error: "no_profile" });
+  });
+
+  // ---- experiments: start + server-side assignment (API key) ----
+  app.post("/v1/experiments/:id/start", async (req, reply) => {
+    const s = await requireSession(req, "admin");
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const r = await tenant(s, (c) => c.query("UPDATE experiments SET status='running', start_at=now() WHERE organization_id=$1 AND id=$2 AND status='draft' RETURNING id", [s.orgId, id]));
+    return r.rowCount ? { status: "running" } : reply.code(409).send({ error: "not_draft_or_missing" });
+  });
+  app.post("/v1/experiments/:id/assign", async (req, reply) => {
+    const tok = bearer(req);
+    const orgId = tok ? ((await d.pool.query("SELECT qg_org_for_api_key($1) AS id", [hashApiKey(tok)])).rows[0]?.id as string | null) : null;
+    if (!orgId) return reply.code(401).send({ error: "unauthorized" });
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { subjectId } = z.object({ subjectId: z.string().min(1).max(200) }).parse(req.body);
+    return withOrg(d.pool, orgId, async (c) => {
+      const e = (await c.query("SELECT spec, status FROM experiments WHERE organization_id=$1 AND id=$2", [orgId, id])).rows[0];
+      if (!e) return reply.code(404).send({ error: "not_found" });
+      if (e.status !== "running") return { variant: "control", reason: "not_running" }; // baseline preserved outside a live window
+      const variant = assignVariant(id, subjectId, e.spec.treatmentShare);
+      await c.query("INSERT INTO experiment_assignments (organization_id, experiment_id, subject_id, variant) VALUES ($1,$2,$3,$4) ON CONFLICT (experiment_id, subject_id) DO NOTHING", [orgId, id, subjectId, variant]);
+      const stored = (await c.query("SELECT variant FROM experiment_assignments WHERE experiment_id=$1 AND subject_id=$2", [id, subjectId])).rows[0].variant;
+      return { variant: stored, reason: "assigned" };
+    });
+  });
+
+  // ---- data export / deletion (owner) ----
+  app.get("/v1/settings/export", async (req) => {
+    const s = await requireSession(req, "owner");
+    return tenant(s, async (c) => {
+      const tier = await tierFor(c, s.orgId);
+      const rows = async (sql: string) => (await c.query(sql, [s.orgId])).rows;
+      const out: Record<string, unknown> = {
+        exportedAt: new Date(now()).toISOString(), organizationId: s.orgId, tier,
+        products: await rows("SELECT id, name, primary_url, mode FROM products WHERE organization_id=$1"),
+        funnelDefinitions: await rows("SELECT version, definition, active FROM funnel_definitions WHERE organization_id=$1"),
+        actions: await rows("SELECT id, domain, type, status, rationale, created_at FROM actions WHERE organization_id=$1"),
+        experiments: await rows("SELECT id, hypothesis, status, decision FROM experiments WHERE organization_id=$1"),
+        integrations: await rows("SELECT provider, status, scopes FROM integrations WHERE organization_id=$1"), // never credentials
+      };
+      try { assertFeature(tier, "auditExport"); out.auditLogs = await rows("SELECT actor, event, subject_id, at FROM audit_logs WHERE organization_id=$1 ORDER BY id"); }
+      catch { out.auditLogs = null; out.auditLogsNote = "Audit-log export is included in the Team plan."; }
+      return out;
+    });
+  });
+
+  app.post("/v1/settings/delete", async (req, reply) => {
+    const s = await requireSession(req, "owner");
+    const { confirmOrgName } = z.object({ confirmOrgName: z.string().min(1) }).parse(req.body);
+    const refs = await tenant(s, async (c) => {
+      const org = (await c.query("SELECT name FROM organizations WHERE id=$1", [s.orgId])).rows[0];
+      if (!org || org.name !== confirmOrgName) return null;
+      return (await c.query("SELECT secret_ref FROM credential_references WHERE organization_id=$1", [s.orgId])).rows.map((r) => r.secret_ref as string);
+    });
+    if (refs === null) return reply.code(422).send({ error: "confirmation_mismatch" });
+    for (const r of refs) await d.secrets.delete(s.orgId, r);
+    const c = await d.adminPool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SELECT set_config('app.org_id', $1, true)", [s.orgId]);
+      await c.query("DELETE FROM organizations WHERE id=$1", [s.orgId]); // ON DELETE CASCADE removes tenant data
+      await c.query("COMMIT");
+    } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+    return { deleted: true };
   });
 
   // ---- internal ----

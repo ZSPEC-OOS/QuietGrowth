@@ -230,3 +230,71 @@ describe.skipIf(!url)("list endpoints", () => {
     await a.close(); await p.query(`DROP SCHEMA ${sch} CASCADE`); await p.end();
   });
 });
+
+describe.skipIf(!url)("commercial, readiness, export/delete, experiment assignment", () => {
+  let p: pg.Pool; let a: FastifyInstance; let sch = "";
+  const secrets = new LocalEncryptedSecretStore(LocalEncryptedSecretStore.generateKey());
+  const go = async (m: "GET" | "POST", u: string, t?: string, b?: unknown) => { const r = await a.inject({ method: m, url: u, headers: { authorization: t ? `Bearer ${t}` : "", "content-type": "application/json" }, payload: b ? JSON.stringify(b) : undefined }); return { s: r.statusCode, j: r.body ? JSON.parse(r.body) : null }; };
+  const signup = async (email: string, org = "Co") => (await go("POST", "/v1/signup", undefined, { email, password: "correct-horse-battery", orgName: org })).j as { token: string; orgId: string };
+  beforeAll(async () => {
+    sch = `t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    p = new pg.Pool({ connectionString: url, max: 4, options: `-c search_path=${sch},public` });
+    await p.query(`CREATE SCHEMA ${sch}`);
+    await migrate(p, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await p.query(`GRANT USAGE ON SCHEMA ${sch} TO qg_app`);
+    a = await buildApp({ adminPool: p, pool: p, sessionSecret: "s", internalSecret: "i", authSecret: "a", secrets, resolver: pub, fetchImpl: async () => ({ status: 200, headers: {}, body: html }), executor: { execute: async () => { throw new Error("n"); } }, verifier: { verify: async () => ({ ok: true, checks: [] }) }, outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) }, scopeFor: (x) => x.id });
+  });
+  afterAll(async () => { await a.close(); await p.query(`DROP SCHEMA ${sch} CASCADE`); await p.end(); });
+
+  it("signup attaches a hosted_starter subscription; second product and controlled-growth mode hit plan limits (402)", async () => {
+    const s = await signup("a@plan.com");
+    expect((await p.query("SELECT tier FROM subscriptions WHERE organization_id=$1", [s.orgId])).rows[0].tier).toBe("hosted_starter");
+    expect((await go("POST", "/v1/onboarding/analyze", s.token, { url: "https://acme.example" })).s).toBe(201);
+    expect((await go("POST", "/v1/onboarding/analyze", s.token, { url: "https://acme2.example" })).s).toBe(402);
+    expect((await go("POST", "/v1/autopilot/policy", s.token, { maxModelSpendUsd: 10, mode: "controlled_growth", maxExternalSpendUsd: 50 })).s).toBe(402);
+    expect((await go("POST", "/v1/autopilot/policy", s.token, { maxModelSpendUsd: 5000 })).s).toBe(402);
+    await p.query("UPDATE subscriptions SET tier='growth' WHERE organization_id=$1", [s.orgId]);
+    expect((await go("POST", "/v1/autopilot/policy", s.token, { maxModelSpendUsd: 10, mode: "controlled_growth", maxExternalSpendUsd: 50 })).s).toBe(201);
+  });
+
+  it("readiness blocks until every Appendix B row passes; profile confirmation is explicit", async () => {
+    const s = await signup("a@ready.com");
+    const r0 = (await go("GET", "/v1/readiness", s.token)).j;
+    expect(r0.ready).toBe(false); expect(r0.blocking).toEqual(expect.arrayContaining(["Product identity", "Funnel", "Billing", "Policy"]));
+    await go("POST", "/v1/onboarding/analyze", s.token, { url: "https://acme.example" });
+    expect((await go("POST", "/v1/product/confirm", s.token)).j.confirmed).toBe(true);
+    expect((await go("GET", "/v1/readiness", s.token)).j.blocking).not.toContain("Product identity");
+    expect((await go("POST", "/v1/product/confirm", (await signup("a@ready2.com")).token)).s).toBe(404);
+  });
+
+  it("export omits credentials and gates audit logs by plan; delete requires owner + exact org name and removes all tenant data and secrets", async () => {
+    const s = await signup("a@del.com", "Delete Me");
+    await go("POST", "/v1/integrations/deepseek/connect", s.token, { credential: "sk-delete-me-secret-123456" });
+    const ref = (await p.query("SELECT secret_ref FROM credential_references WHERE organization_id=$1", [s.orgId])).rows[0].secret_ref;
+    const ex = (await go("GET", "/v1/settings/export", s.token)).j;
+    expect(JSON.stringify(ex)).not.toContain("sk-delete"); expect(ex.auditLogs).toBeNull(); expect(ex.integrations[0].provider).toBe("deepseek");
+    expect((await go("POST", "/v1/settings/delete", s.token, { confirmOrgName: "wrong" })).s).toBe(422);
+    expect((await p.query("SELECT 1 FROM organizations WHERE id=$1", [s.orgId])).rowCount).toBe(1);
+    expect((await go("POST", "/v1/settings/delete", s.token, { confirmOrgName: "Delete Me" })).j.deleted).toBe(true);
+    expect((await p.query("SELECT 1 FROM organizations WHERE id=$1", [s.orgId])).rowCount).toBe(0);
+    expect((await p.query("SELECT 1 FROM integrations WHERE organization_id=$1", [s.orgId])).rowCount).toBe(0);
+    await expect(secrets.get(s.orgId, ref)).rejects.toThrow("not found");
+  });
+
+  it("experiment assignment: deterministic, sticky, baseline unless running, API-key authenticated", async () => {
+    const s = await signup("a@exp.com");
+    const spec = { hypothesis: "h", targetCohort: "c", treatment: "t", controlOrBaseline: "b", primaryMetric: "activated", guardrailMetrics: ["refund"], minimumSamplePerVariant: 10, minimumObservationDays: 1, treatmentShare: 0.5 };
+    const id = (await go("POST", "/v1/experiments", s.token, spec)).j.id;
+    const key = (await go("POST", "/v1/api-keys", s.token, { name: "k" })).j.key;
+    expect((await go("POST", `/v1/experiments/${id}/assign`, undefined, { subjectId: "u1" })).s).toBe(401);
+    expect((await go("POST", `/v1/experiments/${id}/assign`, key, { subjectId: "u1" })).j).toEqual({ variant: "control", reason: "not_running" });
+    expect((await go("POST", `/v1/experiments/${id}/start`, s.token)).j.status).toBe("running");
+    expect((await go("POST", `/v1/experiments/${id}/start`, s.token)).s).toBe(409);
+    const v1 = (await go("POST", `/v1/experiments/${id}/assign`, key, { subjectId: "u1" })).j;
+    expect(v1.reason).toBe("assigned"); expect((await go("POST", `/v1/experiments/${id}/assign`, key, { subjectId: "u1" })).j.variant).toBe(v1.variant);
+    const seen = new Set<string>(); for (let i = 0; i < 40; i++) seen.add((await go("POST", `/v1/experiments/${id}/assign`, key, { subjectId: `s${i}` })).j.variant);
+    expect(seen.size).toBe(2);
+    const other = await signup("a@exp2.com"); const k2 = (await go("POST", "/v1/api-keys", other.token, { name: "k" })).j.key;
+    expect((await go("POST", `/v1/experiments/${id}/assign`, k2, { subjectId: "u1" })).s).toBe(404); // another tenant's key cannot touch it
+  });
+});
