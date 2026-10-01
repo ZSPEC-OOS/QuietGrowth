@@ -21,7 +21,7 @@ describe.skipIf(!url)("admin app", () => {
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: url, max: 4, options: `-c search_path=${sch},public` });
     await pool.query(`CREATE SCHEMA ${sch}`);
-    await migrate(pool, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(pool, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     orgA = (await pool.query("INSERT INTO organizations (name) VALUES ('A') RETURNING id")).rows[0].id;
     orgB = (await pool.query("INSERT INTO organizations (name) VALUES ('B') RETURNING id")).rows[0].id;
     await pool.query("INSERT INTO subscriptions (organization_id, tier) VALUES ($1,'growth'), ($2,'team')", [orgA, orgB]);
@@ -29,6 +29,8 @@ describe.skipIf(!url)("admin app", () => {
     await pool.query("INSERT INTO actions (organization_id, domain, type, target_metric, rationale, evidence_json, idempotency_key, status) VALUES ($1,'acquisition','metadata_change','m','r','[]','k','FAILED')", [orgA]);
     await cells.provision(buildTenantConfig({ orgId: orgA, openclawImage: "reg/openclaw:1", controlPlaneUrl: "https://api.test", secretRefs: { deepseekApiKey: "a", internalSecret: "b" }, tokenCeilingPerRun: 100 }));
     await cells.start(orgA);
+    const ca = cells.get(orgA)!;
+    await pool.query("INSERT INTO runtime_cells (organization_id, instance_id, image, status, port) VALUES ($1,$2,$3,$4,$5)", [orgA, ca.instanceId, ca.image, ca.status, ca.port]);
     app = await buildAdminApp({ pool, cells, adminToken: TOKEN, secrets, internalMaster: "int-master" });
   });
   afterAll(async () => { await app.close(); await pool.query(`DROP SCHEMA ${sch} CASCADE`); await pool.end(); });
@@ -46,7 +48,7 @@ describe.skipIf(!url)("admin app", () => {
     expect(t.find((x: any) => x.id === orgB).cell).toBe("none");
   });
   it("incident view surfaces failed actions, degraded connectors and unhealthy cells", async () => {
-    await cells.health(orgA); // inspect reports exited => unhealthy
+    await pool.query("UPDATE runtime_cells SET status='unhealthy' WHERE organization_id=$1", [orgA]); // as recorded by a health check
     const i = (await app.inject({ method: "GET", url: "/admin/incidents", headers: H() })).json();
     expect(i.failedActions).toHaveLength(1); expect(i.unhealthyIntegrations[0].provider).toBe("stripe"); expect(i.unhealthyCells).toHaveLength(1);
   });

@@ -25,7 +25,7 @@ describe.skipIf(!url)("control-plane API", () => {
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: url, max: 6, options: `-c search_path=${schema},public` });
     await pool.query(`CREATE SCHEMA ${schema}`);
-    await migrate(pool, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(pool, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     await pool.query(`GRANT USAGE ON SCHEMA ${schema} TO qg_app`);
     app = await buildApp({
       adminPool: pool, pool, sessionSecret: "sess", internalSecret: "int", authSecret: "auth", secrets, resolver: pub,
@@ -184,7 +184,7 @@ describe.skipIf(!url)("agent tool router", () => {
     (globalThis as any).__toolSchema = sch;
     pool = new pg.Pool({ connectionString: url, max: 4, options: `-c search_path=${sch},public` });
     await pool.query(`CREATE SCHEMA ${sch}`);
-    await migrate(pool, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(pool, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     await pool.query(`GRANT USAGE ON SCHEMA ${sch} TO qg_app`);
     org = (await pool.query("INSERT INTO organizations (name) VALUES ('T') RETURNING id")).rows[0].id;
     app = await buildApp({ adminPool: pool, pool, sessionSecret: "s", internalSecret: "int", authSecret: "a", secrets: new LocalEncryptedSecretStore(LocalEncryptedSecretStore.generateKey()), resolver: pub, fetchImpl: async () => ({ status: 200, headers: {}, body: "" }), executor: { execute: async () => { throw new Error("no"); } }, verifier: { verify: async () => ({ ok: true, checks: [] }) }, outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) }, scopeFor: (a) => `a:${a.id}` });
@@ -234,7 +234,7 @@ describe.skipIf(!url)("list endpoints", () => {
     const sch = `t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const p = new pg.Pool({ connectionString: url, max: 3, options: `-c search_path=${sch},public` });
     await p.query(`CREATE SCHEMA ${sch}`);
-    await migrate(p, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(p, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     await p.query(`GRANT USAGE ON SCHEMA ${sch} TO qg_app`);
     const a = await buildApp({ adminPool: p, pool: p, sessionSecret: "s", internalSecret: "i", authSecret: "a", secrets: new LocalEncryptedSecretStore(LocalEncryptedSecretStore.generateKey()), resolver: pub, fetchImpl: async () => ({ status: 200, headers: {}, body: html }), executor: { execute: async () => { throw new Error("n"); } }, verifier: { verify: async () => ({ ok: true, checks: [] }) }, outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) }, scopeFor: (x) => x.id });
     const go = async (m: "GET" | "POST", u: string, t?: string, b?: unknown) => { const r = await a.inject({ method: m, url: u, headers: { authorization: t ? `Bearer ${t}` : "", "content-type": "application/json" }, payload: b ? JSON.stringify(b) : undefined }); return { s: r.statusCode, j: r.body ? JSON.parse(r.body) : null }; };
@@ -260,7 +260,7 @@ describe.skipIf(!url)("commercial, readiness, export/delete, experiment assignme
     sch = `t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     p = new pg.Pool({ connectionString: url, max: 4, options: `-c search_path=${sch},public` });
     await p.query(`CREATE SCHEMA ${sch}`);
-    await migrate(p, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(p, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     await p.query(`GRANT USAGE ON SCHEMA ${sch} TO qg_app`);
     a = await buildApp({ adminPool: p, pool: p, sessionSecret: "s", internalSecret: "i", authSecret: "a", secrets, resolver: pub, fetchImpl: async () => ({ status: 200, headers: {}, body: html }), executor: { execute: async () => { throw new Error("n"); } }, verifier: { verify: async () => ({ ok: true, checks: [] }) }, outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) }, scopeFor: (x) => x.id });
   });

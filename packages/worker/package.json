@@ -7,12 +7,9 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "start": "node dist/main.js"
+    "test": "vitest run"
   },
   "dependencies": {
-    "bullmq": "^5.20.0",
-    "ioredis": "^5.4.0",
     "pg": "^8.13.0",
     "@quietgrowth/domain": "workspace:*",
     "@quietgrowth/policy-engine": "workspace:*",
@@ -39,15 +36,5 @@
   "devDependencies": {
     "@types/pg": "^8.11.0"
   },
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./lib": {
-      "types": "./dist/lib.d.ts",
-      "default": "./dist/lib.js"
-    }
-  }
+  "types": "dist/index.d.ts"
 }

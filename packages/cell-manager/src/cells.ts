@@ -9,7 +9,7 @@ export interface CellRecord { orgId: string; instanceId: string; image: string; 
 export interface CellQuota { maxCells: number; memoryMb: number; cpus: number; pids: number }
 export const DEFAULT_QUOTA: CellQuota = { maxCells: 200, memoryMb: 1024, cpus: 1, pids: 256 };
 
-export class CellError extends Error {}
+export class CellError extends Error { override name = "CellError"; }
 
 const nameFor = (orgId: string): string => `qg-cell-${orgId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 32)}`;
 
@@ -17,6 +17,8 @@ export class DockerCellManager {
   private readonly cells = new Map<string, CellRecord>();
   constructor(private readonly docker: CommandRunner, private readonly basePort: number, private readonly quota: CellQuota = DEFAULT_QUOTA, private readonly allowedImages: string[] = []) {}
 
+  /** Replaces the in-memory registry with persisted records (stateless hosts rebuild it per request). */
+  hydrate(records: CellRecord[]): void { this.cells.clear(); for (const r of records) this.cells.set(r.orgId, { ...r }); }
   list(): CellRecord[] { return [...this.cells.values()]; }
   get(orgId: string): CellRecord | undefined { return this.cells.get(orgId); }
 
@@ -88,3 +90,16 @@ export class DockerCellManager {
   /** Runtime version pinning check: every cell must run an allowed image. Returns offenders. */
   versionDrift(): CellRecord[] { return this.allowedImages.length ? this.list().filter((c) => !this.allowedImages.includes(c.image)) : []; }
 }
+
+/** Runs the real docker CLI. Only enable on hosts that have a Docker daemon (never on serverless platforms). */
+export function nodeCommandRunner(spawnFn: typeof import("node:child_process").spawn): CommandRunner {
+  return { run: (cmd, args) => new Promise((resolve) => {
+    const p = spawnFn(cmd, args); let out = "", err = "";
+    p.stdout?.on("data", (d) => (out += d)); p.stderr?.on("data", (d) => (err += d));
+    p.on("error", (e) => resolve({ code: 127, stdout: out, stderr: String(e) }));
+    p.on("close", (code) => resolve({ code: code ?? 1, stdout: out, stderr: err }));
+  }) };
+}
+
+/** Used where no container runtime exists: every cell operation fails with a clear, non-leaky error. */
+export const unavailableRunner: CommandRunner = { run: async () => ({ code: 127, stdout: "", stderr: "container runtime not available in this deployment" }) };

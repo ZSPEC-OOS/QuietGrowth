@@ -1,6 +1,6 @@
 # Implementation status
 
-Verified in the authoring environment: `pnpm check` (typecheck + **353 tests**, Postgres 16 and Redis available), `pnpm build` (all apps and packages, including `next build`), and a real-stack browser E2E (`node tests/e2e/run.mjs`: Postgres + API + Next.js + headless Chromium, 14/14 steps).
+Verified in the authoring environment: `pnpm check` (typecheck + **352 tests**, Postgres 16 available), `pnpm build` (everything, including `next build`), and a real-stack browser E2E (`node tests/e2e/run.mjs`: Postgres + the single Next.js app + headless Chromium).
 
 ## What is built, by milestone (plan: docs/IMPLEMENTATION_PLAN.md)
 
@@ -13,7 +13,7 @@ Verified in the authoring environment: `pnpm check` (typecheck + **353 tests**, 
 | M4 SEO closed loop | **Done** end-to-end with fakes | detect → propose → policy → PR (branch only) → PR verification → observe → evaluate. Live-page verification stage (post-merge) is implemented in `verification` but not scheduled by the worker |
 | M5 activation/lifecycle/experiments | **Done** | Bottleneck + regression detectors, rule-based segments, email connector (suppression/caps/idempotency), experiment evaluation with guardrails and approval-gated winners, native assignment endpoint |
 | M6 product-led growth | **Partial** | Opportunity templates (invite, share, integration pages, templates) exist; the PLG facts source returns nothing until product instrumentation provides them, and in-product prompt PRs are not generated |
-| M7 hosted beta | **Partial** | Cell provisioning/health/quota/version-drift, admin app (incidents, restart, suspend, provision), entitlements, export/delete. Not built: backups/restore tooling, usage metering for billing QuietGrowth itself |
+| M7 hosted beta | **Partial** | Cell provisioning/health/quota/version-drift, admin surface (`/api/admin`: incidents, restart, suspend, provision), entitlements, export/delete. Not built: backups/restore tooling, usage metering for billing QuietGrowth itself |
 | M8 paid growth | **Guardrails only** | Gate, caps, bid-change cap, stop-loss, authorisation-bound writes. No live Google Ads API client; `AdsApi` is an interface |
 
 ## MR §25 definition of done

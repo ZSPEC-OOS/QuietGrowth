@@ -2,7 +2,10 @@ import pg from "pg";
 import { promises as dns } from "node:dns";
 import type { FastifyInstance } from "fastify";
 import { LocalEncryptedSecretStore, PgBacking } from "@quietgrowth/secrets";
-import { buildWorkerDeps, runTick } from "@quietgrowth/worker/lib";
+import { spawn } from "node:child_process";
+import { buildWorkerDeps, runTick } from "@quietgrowth/worker";
+import { adminPlugin } from "@quietgrowth/admin";
+import { DockerCellManager, nodeCommandRunner, unavailableRunner } from "@quietgrowth/cell-manager";
 import { buildApp } from "./app.js";
 import { secretsEqual } from "./auth.js";
 
@@ -16,11 +19,12 @@ import { secretsEqual } from "./auth.js";
  * - Background work without a queue: `GET /cron/tick` (bearer CRON_SECRET, as sent by Vercel Cron) runs the same
  *   idempotent handlers as the BullMQ worker within a time budget.
  */
-export interface ProductionApp { app: FastifyInstance; pool: pg.Pool }
+export interface ProductionApp { app: FastifyInstance; pool: pg.Pool; adminPool?: pg.Pool }
 
 const need = (env: Record<string, string | undefined>, k: string): string => { const v = env[k]; if (!v) throw new Error(`${k} is required`); return v; };
 
 export async function createProductionApp(env: Record<string, string | undefined> = process.env): Promise<ProductionApp> {
+  let adminPool: pg.Pool | undefined;
   const pool = new pg.Pool({ connectionString: need(env, "DATABASE_URL"), max: Number(env.PG_POOL_MAX ?? 3), idleTimeoutMillis: 10_000, connectionTimeoutMillis: 10_000 });
   try {
     const app = await buildApp({
@@ -45,7 +49,15 @@ export async function createProductionApp(env: Record<string, string | undefined
       return runTick(buildWorkerDeps(env, pool), orgs, Number(env.TICK_BUDGET_MS ?? 45_000));
     });
 
+    // Internal operations surface (public path /api/admin/*). Disabled unless BOTH a strong token and a dedicated
+    // cross-tenant database role (member of qg_admin, BYPASSRLS) are configured.
+    if (env.ADMIN_TOKEN && env.ADMIN_DATABASE_URL) {
+      adminPool = new pg.Pool({ connectionString: env.ADMIN_DATABASE_URL, max: 2, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 10_000 });
+      const cells = new DockerCellManager(env.OPENCLAW_DOCKER === "1" ? nodeCommandRunner(spawn) : unavailableRunner, Number(env.OPENCLAW_GATEWAY_BASE_PORT ?? 20000), undefined, (env.OPENCLAW_ALLOWED_IMAGES ?? "").split(",").filter(Boolean));
+      await app.register(adminPlugin({ pool: adminPool, cells, adminToken: env.ADMIN_TOKEN, internalMaster: need(env, "INTERNAL_SECRET"), secrets: new LocalEncryptedSecretStore(need(env, "SECRET_MASTER_KEY"), new PgBacking(pool)) }));
+    }
+
     await app.ready();
-    return { app, pool };
-  } catch (e) { await pool.end().catch(() => undefined); throw e; }
+    return { app, pool, adminPool };
+  } catch (e) { await pool.end().catch(() => undefined); await adminPool?.end().catch(() => undefined); throw e; }
 }

@@ -13,7 +13,7 @@ const DBURL = ADMIN.replace(/\/[^/]+$/, `/${DB}`);
 // Next builds redirect URLs from `localhost`, so the browser must use the same host or the session cookie will not match.
 const WEB = "http://localhost:3200", API = `${WEB}/api`;
 const CRON_SECRET = "c".repeat(32);
-const ENV = { DATABASE_URL: DBURL, SESSION_SECRET: "e2e-session-".padEnd(32, "x"), INTERNAL_SECRET: "e2e-internal-".padEnd(32, "x"), ACTION_AUTH_SECRET: "e2e-auth-".padEnd(32, "x"), SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString("base64"), CRON_SECRET, QG_LOG: "0", PG_POOL_MAX: "3" };
+const ENV = { DATABASE_URL: DBURL, SESSION_SECRET: "e2e-session-".padEnd(32, "x"), INTERNAL_SECRET: "e2e-internal-".padEnd(32, "x"), ACTION_AUTH_SECRET: "e2e-auth-".padEnd(32, "x"), SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString("base64"), CRON_SECRET, QG_LOG: "0", PG_POOL_MAX: "3", ADMIN_TOKEN: "admin-".padEnd(32, "z"), ADMIN_DATABASE_URL: DBURL };
 const procs = [];
 
 const run = (cmd, args, env, name) => {
@@ -138,6 +138,18 @@ async function main() {
     assert.equal((await fetch(`${API}/v1/events`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer x", "content-length": "5000000" }, body: "{}" }).catch(() => ({ status: 413 }))).status, 413);
     assert.equal((await fetch(`${API}/does/not/exist`)).status, 404);
     const hdr = (await fetch(`${API}/healthz`)).headers; assert.equal(hdr.get("cache-control"), "no-store");
+  });
+  await step("admin surface is part of the same deployment: token-gated, tenant listing works, cells report no runtime on this host", async () => {
+    const H = { authorization: `Bearer ${ENV.ADMIN_TOKEN}`, "content-type": "application/json" };
+    assert.equal((await fetch(`${API}/admin/tenants`)).status, 401);
+    assert.equal((await fetch(`${API}/admin/tenants`, { headers: { authorization: "Bearer wrong" } })).status, 401);
+    const list = await (await fetch(`${API}/admin/tenants`, { headers: H })).json();
+    assert.ok(list.tenants.some((t) => t.id === org && t.tier === "hosted_starter"), JSON.stringify(list));
+    assert.equal((await (await fetch(`${API}/admin/incidents`, { headers: H })).json()).unhealthyCells.length, 0);
+    const prov = await fetch(`${API}/admin/cells/${org}/provision`, { method: "POST", headers: H, body: JSON.stringify({ openclawImage: "reg/openclaw:1", controlPlaneUrl: "https://app.example/api", deepseekSecretRef: "sec_deepseek_x" }) });
+    assert.equal(prov.status, 503); assert.equal((await prov.json()).error, "runtime_unavailable");
+    assert.equal((await fetch(`${API}/admin/tenants/${org}/status`, { method: "POST", headers: H, body: JSON.stringify({ status: "suspended", reason: "e2e check" }) })).status, 200);
+    assert.equal((await fetch(`${API}/admin/tenants/${org}/status`, { method: "POST", headers: H, body: JSON.stringify({ status: "active", reason: "e2e restore" }) })).status, 200);
   });
   await step("every main screen renders without server errors", async () => {
     for (const p of ["dashboard", "funnel", "opportunities", "actions", "acquisition", "lifecycle", "experiments", "analytics", "autopilot", "integrations", "product", "settings"]) {

@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyPluginAsync } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { Pool } from "pg";
@@ -6,26 +6,26 @@ import { createHmac } from "node:crypto";
 import type { SecretStore } from "@quietgrowth/secrets";
 import { buildTenantConfig, type DockerCellManager } from "@quietgrowth/cell-manager";
 
-// Internal tenant/runtime operations (MR §17 apps/admin, §21.7). Not customer-facing: bearer token + private network only.
+// Internal tenant/runtime operations (MR §17, §21.7), mounted into the main app under /admin (public path /api/admin/*).
+// Not customer-facing: bearer ADMIN_TOKEN, and a separate BYPASSRLS database role (qg_admin) for cross-tenant reads.
 export interface AdminDeps { pool: Pool; cells: DockerCellManager; adminToken: string; now?: () => number; actor?: string; secrets: SecretStore; /** Same master as the API's INTERNAL_SECRET; cells only ever receive the secret derived for their own org. */ internalMaster: string }
 
 const same = (a: string, b: string): boolean => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
-export async function buildAdminApp(d: AdminDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+/** Encapsulated Fastify plugin: its auth hook and error handler apply only to the routes registered here. */
+export function adminPlugin(d: AdminDeps): FastifyPluginAsync {
+  return async (app) => {
   const now = d.now ?? Date.now;
-
-  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
-    if (body === "") return done(null, {});
-    try { done(null, JSON.parse(body as string)); } catch { done(Object.assign(new Error("invalid JSON body"), { statusCode: 400 }), undefined); }
-  });
 
   app.addHook("onRequest", async (req, reply) => {
     const t = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
     if (!d.adminToken || d.adminToken.length < 24 || !t || !same(t, d.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    // Serverless instances have no memory between requests: the cell registry is rebuilt from the database each time.
+    d.cells.hydrate((await d.pool.query("SELECT organization_id, instance_id, image, port, status FROM runtime_cells")).rows.map((r) => ({ orgId: r.organization_id, instanceId: r.instance_id, image: r.image, port: r.port, status: r.status })));
   });
   app.setErrorHandler((err: Error, _req, reply) => {
     if (err instanceof z.ZodError) return reply.code(400).send({ error: "invalid_request" });
+    if (err.name === "CellError") return reply.code(503).send({ error: "runtime_unavailable", message: err.message }); // e.g. no container runtime on this host
     const status = (err as { statusCode?: number }).statusCode;
     return reply.code(status && status < 500 ? status : 500).send({ error: status && status < 500 ? err.message : "internal_error" });
   });
@@ -47,7 +47,7 @@ export async function buildAdminApp(d: AdminDeps): Promise<FastifyInstance> {
     const since = new Date(now() - 86_400_000);
     const failed = (await d.pool.query("SELECT organization_id, id, type, created_at FROM actions WHERE status='FAILED' AND created_at > $1 ORDER BY created_at DESC LIMIT 200", [since])).rows;
     const integ = (await d.pool.query("SELECT organization_id, provider, status FROM integrations WHERE status<>'healthy'")).rows;
-    const cells = d.cells.list().filter((c) => c.status === "unhealthy").map((c) => ({ orgId: c.orgId, instanceId: c.instanceId }));
+    const cells = d.cells.list().filter((c) => c.status === "unhealthy").map((c) => ({ orgId: c.orgId, instanceId: c.instanceId })); // status is persisted by cell operations
     return { failedActions: failed, unhealthyIntegrations: integ, unhealthyCells: cells, versionDrift: d.cells.versionDrift().map((c) => ({ orgId: c.orgId, image: c.image })) };
   });
 
@@ -55,6 +55,7 @@ export async function buildAdminApp(d: AdminDeps): Promise<FastifyInstance> {
     const { orgId } = z.object({ orgId: z.string().uuid() }).parse(req.params);
     if (!d.cells.get(orgId)) return reply.code(404).send({ error: "no_cell" });
     const healthy = await d.cells.restartUnhealthy(orgId, 3);
+    await d.pool.query("UPDATE runtime_cells SET status=$2, updated_at=now() WHERE organization_id=$1", [orgId, d.cells.get(orgId)?.status ?? "unhealthy"]);
     await audit(orgId, "admin:cell_restart", { healthy });
     return { healthy };
   });
@@ -81,10 +82,21 @@ export async function buildAdminApp(d: AdminDeps): Promise<FastifyInstance> {
     const { status, reason } = z.object({ status: z.enum(["active", "suspended"]), reason: z.string().min(3).max(300) }).parse(req.body);
     const r = await d.pool.query("UPDATE subscriptions SET status=$2 WHERE organization_id=$1", [orgId, status]);
     if (!r.rowCount) return reply.code(404).send({ error: "no_subscription" });
-    if (status === "suspended" && d.cells.get(orgId)) await d.cells.stop(orgId);
+    if (status === "suspended" && d.cells.get(orgId)) { await d.cells.stop(orgId); await d.pool.query("UPDATE runtime_cells SET status='stopped', updated_at=now() WHERE organization_id=$1", [orgId]); }
     await audit(orgId, `admin:tenant_${status}`, { reason });
     return { status };
   });
 
+  };
+}
+
+/** Standalone instance (used by tests and any host that wants only the admin surface). */
+export async function buildAdminApp(d: AdminDeps): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    if (body === "") return done(null, {});
+    try { done(null, JSON.parse(body as string)); } catch { done(Object.assign(new Error("invalid JSON body"), { statusCode: 400 }), undefined); }
+  });
+  await app.register(adminPlugin(d));
   return app;
 }

@@ -1,12 +1,4 @@
-# Local / single-host stack. Services bind to localhost only; put TLS termination in front for anything public.
-x-app: &app
-  build: { context: .., dockerfile: infra/Dockerfile }
-  env_file: ../.env
-  restart: unless-stopped
-  depends_on:
-    postgres: { condition: service_healthy }
-    redis: { condition: service_healthy }
-
+# Self-host stack: one app image + Postgres. Bind to localhost; put TLS termination in front for anything public.
 services:
   postgres:
     image: postgres:16
@@ -14,42 +6,27 @@ services:
     ports: ["127.0.0.1:5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, timeout: 5s, retries: 20 }
-  redis:
-    image: redis:7
-    ports: ["127.0.0.1:6379:6379"]
-    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 5s, retries: 20 }
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
-    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
-    volumes: ["miniodata:/data"]
 
   migrate:
-    <<: *app
-    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: migrate } }
+    build: { context: .., dockerfile: infra/Dockerfile }
+    command: ["node", "packages/database/dist/migrate-cli.js"]
+    env_file: ../.env
     restart: "no"
-  api:
-    <<: *app
-    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: api } }
-    environment: { HOST: 0.0.0.0, PORT: "3001" }
-    ports: ["127.0.0.1:3001:3001"]
-    depends_on: { migrate: { condition: service_completed_successfully } }
-  worker:
-    <<: *app
-    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: worker } }
-    depends_on: { migrate: { condition: service_completed_successfully } }
-  web:
-    <<: *app
-    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: web } }
-    environment: { PORT: "3000", API_URL: "http://api:3001" }
+    depends_on: { postgres: { condition: service_healthy } }
+
+  app:
+    build: { context: .., dockerfile: infra/Dockerfile }
+    env_file: ../.env
+    restart: unless-stopped
     ports: ["127.0.0.1:3000:3000"]
-    depends_on: { api: { condition: service_started } }
-  admin:
-    <<: *app
-    profiles: ["ops"]
-    build: { context: .., dockerfile: infra/Dockerfile, args: { APP: admin } }
-    environment: { HOST: 0.0.0.0, PORT: "3002" }
-    ports: ["127.0.0.1:3002:3002"]
     depends_on: { migrate: { condition: service_completed_successfully } }
 
-volumes: { pgdata: {}, miniodata: {} }
+  # Stand-in for Vercel Cron: calls the same /api/cron/tick endpoint every 15 minutes.
+  cron:
+    image: curlimages/curl:8.10.1
+    env_file: ../.env
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "while true; do sleep 900; curl -fsS -H \"Authorization: Bearer $$CRON_SECRET\" http://app:3000/api/cron/tick >/dev/null || echo tick failed; done"]
+    depends_on: [app]
+
+volumes: { pgdata: {} }

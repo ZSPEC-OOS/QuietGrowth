@@ -7,10 +7,10 @@ Controls and the tests that enforce them. This is an engineering summary, not an
 | Tenant isolation (DB) | Forced RLS on every `organization_id` table, fail-closed when no tenant is bound; SECURITY DEFINER helpers expose only org ids for API keys and memberships | `packages/database/src/identity.test.ts` (schema-wide invariant) |
 | Tenant isolation (runtime) | Cell per org; contract org must match the cell; hardened container flags; pinned images | `cell-manager`, `openclaw-client` tests |
 | SSRF | Public-address validation on every hop, redirects re-validated, size/redirect caps | `packages/saas-profile` tests, E2E |
-| AuthN/Z | scrypt passwords, HMAC session tokens with expiry, role checks (owner/admin/member), httpOnly cookie, constant-time compares | `apps/api` tests, E2E |
+| AuthN/Z | scrypt passwords, HMAC session tokens with expiry, role checks (owner/admin/member), httpOnly cookie, constant-time compares | `packages/api` tests, E2E |
 | Mutation authorisation | Signed scoped tokens, replay-proof idempotency, health-gated connectors, branch-only repo writes with path allowlist | `policy-engine`, `connectors-core`, `connector-cms` tests |
 | Spend | Zero-Spend has no path to external spend (permanent regression suite); paid mode behind a six-condition gate, caps and stop-loss | `growth-engine/src/zero-spend.regression.test.ts`, `connector-google-ads` |
-| Cell → control plane | Per-tenant derived internal secret (`HMAC(master, "internal:"+orgId)`): a compromised cell cannot act as another tenant; timing-safe compare | `apps/api` tests (tool router), `apps/admin` provisioning |
+| Cell → control plane | Per-tenant derived internal secret (`HMAC(master, "internal:"+orgId)`): a compromised cell cannot act as another tenant; timing-safe compare | `packages/api` tests (tool router), `packages/admin` provisioning |
 | Agent-supplied payloads | Zod validation of SEO payloads, repo coordinates and file paths before any URL or patch is built; branch-only writes under `qg/` | `packages/acquisition`, `packages/connector-cms` tests |
 | Prompt injection | Authorisation independent of content; injection corpus across all agents | `openclaw/evals` |
 | Webhooks | Stripe signature + replay tolerance; out-of-order/replay convergent reconcile | `connector-billing` tests |
