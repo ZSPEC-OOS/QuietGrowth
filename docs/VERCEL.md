@@ -19,6 +19,8 @@ Browser ──► Next.js (apps/web) ─┬─ pages / server components / serve
 2. The login role must **not** be a superuser (superusers bypass RLS). It needs permission to create roles (migrations create `qg_app` and `qg_admin`) and the migration `GRANT qg_app TO CURRENT_USER` lets the app `SET LOCAL ROLE qg_app` per transaction. Transaction-mode poolers support this.
 
 ## 2. Project settings
+> **Vercel may offer a "Services" preset** listing `packages/api` and `packages/admin` as Fastify apps, because those libraries depend on `fastify`. Ignore it: set **Root Directory = `apps/web`** and preset **Next.js**. There is exactly one deployable.
+
 - Import the repo. **Root Directory: `apps/web`**, framework Next.js. `apps/web/vercel.json` already sets:
   - install: `cd ../.. && pnpm install --frozen-lockfile`
   - build: `node scripts/vercel-build.mjs` (builds workspace packages, optionally migrates, runs `next build` through Turborepo)
