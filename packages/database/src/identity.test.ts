@@ -76,3 +76,27 @@ describe.skipIf(!url)("identity schema + RLS", () => {
     await expect(withOrg(pool, orgA, (c) => c.query("INSERT INTO organizations (name) VALUES ('evil')"))).rejects.toThrow();
   });
 });
+
+describe.skipIf(!url)("schema-wide tenant isolation invariant", () => {
+  it("every table with organization_id has forced RLS and a policy", async () => {
+    const p = new pg.Pool({ connectionString: url, options: `-c search_path=${schema},public` });
+    await p.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+    await migrate(p, dir).catch(() => {});
+    const r = await p.query(
+      `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
+              (SELECT count(*) FROM pg_policy WHERE polrelid = c.oid) AS policies
+         FROM pg_class c
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'organization_id' AND NOT a.attisdropped
+        WHERE c.relkind = 'r' AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $1)`,
+      [schema],
+    );
+    expect(r.rows.length).toBeGreaterThan(30);
+    for (const row of r.rows) {
+      expect(row.relrowsecurity, row.relname).toBe(true);
+      expect(row.relforcerowsecurity, row.relname).toBe(true);
+      expect(Number(row.policies), row.relname).toBeGreaterThan(0);
+    }
+    await p.query(`DROP SCHEMA ${schema} CASCADE`);
+    await p.end();
+  });
+});

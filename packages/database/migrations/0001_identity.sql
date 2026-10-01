@@ -1,5 +1,4 @@
 -- M0.2: identity domain + tenant isolation via row-level security (MR §16).
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Application role. Not a superuser and not the table owner, so RLS always applies.
 DO $$ BEGIN
