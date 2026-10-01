@@ -2,10 +2,12 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { Pool } from "pg";
-import type { DockerCellManager } from "@quietgrowth/cell-manager";
+import { createHmac } from "node:crypto";
+import type { SecretStore } from "@quietgrowth/secrets";
+import { buildTenantConfig, type DockerCellManager } from "@quietgrowth/cell-manager";
 
 // Internal tenant/runtime operations (MR §17 apps/admin, §21.7). Not customer-facing: bearer token + private network only.
-export interface AdminDeps { pool: Pool; cells: DockerCellManager; adminToken: string; now?: () => number; actor?: string }
+export interface AdminDeps { pool: Pool; cells: DockerCellManager; adminToken: string; now?: () => number; actor?: string; secrets: SecretStore; /** Same master as the API's INTERNAL_SECRET; cells only ever receive the secret derived for their own org. */ internalMaster: string }
 
 const same = (a: string, b: string): boolean => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
@@ -55,6 +57,22 @@ export async function buildAdminApp(d: AdminDeps): Promise<FastifyInstance> {
     const healthy = await d.cells.restartUnhealthy(orgId, 3);
     await audit(orgId, "admin:cell_restart", { healthy });
     return { healthy };
+  });
+
+  // Provision (idempotent) a pinned, validated cell for a tenant. Secrets are passed as references only.
+  app.post("/admin/cells/:orgId/provision", async (req, reply) => {
+    const { orgId } = z.object({ orgId: z.string().uuid() }).parse(req.params);
+    const b = z.object({ openclawImage: z.string().min(3), controlPlaneUrl: z.string().url(), deepseekSecretRef: z.string().min(3), tokenCeilingPerRun: z.number().int().positive().default(20000) }).parse(req.body);
+    if (!(await d.pool.query("SELECT 1 FROM organizations WHERE id=$1", [orgId])).rowCount) return reply.code(404).send({ error: "no_such_tenant" });
+    // Mirror of the API's internalSecretFor: HMAC(master, "internal:" + orgId), stored sealed and handed to the cell by reference.
+    const internalRef = await d.secrets.put(orgId, "internal", createHmac("sha256", d.internalMaster).update(`internal:${orgId}`).digest("base64url"));
+    let cfg;
+    try { cfg = buildTenantConfig({ orgId, openclawImage: b.openclawImage, controlPlaneUrl: b.controlPlaneUrl, secretRefs: { deepseekApiKey: b.deepseekSecretRef, internalSecret: internalRef }, tokenCeilingPerRun: b.tokenCeilingPerRun }); }
+    catch (e) { await d.secrets.delete(orgId, internalRef); return reply.code(422).send({ error: "invalid_cell_config", message: (e as Error).message }); }
+    const cell = await d.cells.provision(cfg);
+    await d.pool.query("INSERT INTO runtime_cells (organization_id, instance_id, image, status, port) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (organization_id) DO UPDATE SET instance_id=EXCLUDED.instance_id, image=EXCLUDED.image, status=EXCLUDED.status, port=EXCLUDED.port, updated_at=now()", [orgId, cell.instanceId, cell.image, cell.status, cell.port]);
+    await audit(orgId, "admin:cell_provisioned", { image: cell.image, port: cell.port });
+    return reply.code(201).send({ instanceId: cell.instanceId, port: cell.port });
   });
 
   // Suspension stops dispatch for a tenant (worker skips non-active subscriptions); it never deletes data.

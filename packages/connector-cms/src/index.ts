@@ -9,6 +9,15 @@ export interface FilePatch { path: string; content: string; message: string }
 export interface PrRequest { repo: RepoRef; branch: string; patches: FilePatch[]; title: string; body: string; actionId: string; policyVersion: string }
 
 const BRANCH_PREFIX = "qg/";
+const REPO_PART = /^[A-Za-z0-9_.-]{1,100}$/;
+const BRANCH_NAME = /^[A-Za-z0-9_./-]{1,200}$/;
+
+/** Repo coordinates end up in API URL paths; reject anything that could change the path or target another repository. */
+export function assertRepoRef(r: RepoRef, allowed?: { owner: string; repo: string }[]): void {
+  if (!REPO_PART.test(r.owner) || !REPO_PART.test(r.repo) || r.owner === "." || r.owner === ".." || r.repo === "." || r.repo === ".." || !BRANCH_NAME.test(r.baseBranch) || r.baseBranch.includes(".."))
+    throw new ForbiddenPathError("invalid repository reference");
+  if (allowed && !allowed.some((a) => a.owner.toLowerCase() === r.owner.toLowerCase() && a.repo.toLowerCase() === r.repo.toLowerCase())) throw new ForbiddenPathError("repository is not connected for this organization");
+}
 const SAFE_PATH = /^(?!.*(^|\/)\.\.(\/|$))(?!\/)[\w./@-]+$/;
 const DENIED_PATH = /(^|\/)(\.github|\.git|node_modules|\.env[^/]*|secrets?)(\/|$)/i;
 
@@ -21,7 +30,7 @@ export function assertSafePatch(p: FilePatch, allowedRoots: string[]): void {
 export class GithubConnector {
   readonly provider = "github";
   readonly gate = new HealthGate();
-  constructor(private readonly http: HttpClient, private readonly token: () => Promise<string>, private readonly auth: AuthContext, private readonly allowedRoots: string[] = [], private readonly sleep?: (ms: number) => Promise<void>) {}
+  constructor(private readonly http: HttpClient, private readonly token: () => Promise<string>, private readonly auth: AuthContext, private readonly allowedRoots: string[] = [], private readonly sleep?: (ms: number) => Promise<void>, private readonly allowedRepos?: { owner: string; repo: string }[]) {}
 
   /** Resource scope a caller must request authorisation for. */
   static scope(r: RepoRef, branch: string): string { return `repo:${r.owner}/${r.repo}:branch:${branch}`; }
@@ -31,6 +40,8 @@ export class GithubConnector {
   }
 
   async read(r: RepoRef, path: string): Promise<{ content: string; sha: string } | null> {
+    assertRepoRef(r, this.allowedRepos);
+    assertSafePatch({ path, content: "", message: "" }, this.allowedRoots);
     const res = await this.call("GET", `/repos/${r.owner}/${r.repo}/contents/${encodeURI(path)}?ref=${encodeURIComponent(r.baseBranch)}`);
     if (res.status === 404) return null;
     if (res.status !== 200) throw new Error(`github read failed: ${res.status}`);
@@ -40,7 +51,8 @@ export class GithubConnector {
 
   /** Creates branch, commits patches, opens a PR. Verifies authorisation before any network write. */
   async openPullRequest(req: PrRequest, token: string): Promise<WriteReceipt> {
-    if (!req.branch.startsWith(BRANCH_PREFIX) || req.branch === req.repo.baseBranch) throw new ForbiddenBranchError(`branch must start with ${BRANCH_PREFIX}`);
+    assertRepoRef(req.repo, this.allowedRepos);
+    if (!req.branch.startsWith(BRANCH_PREFIX) || req.branch === req.repo.baseBranch || !BRANCH_NAME.test(req.branch) || req.branch.includes("..")) throw new ForbiddenBranchError(`branch must start with ${BRANCH_PREFIX}`);
     for (const p of req.patches) assertSafePatch(p, this.allowedRoots);
     const a = authorizeWrite(this.gate, this.auth, token, { actionId: req.actionId, policyVersion: req.policyVersion, resourceScope: GithubConnector.scope(req.repo, req.branch) });
     const { owner, repo, baseBranch } = req.repo;

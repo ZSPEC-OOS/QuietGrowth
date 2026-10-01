@@ -1,0 +1,22 @@
+{
+  "name": "@quietgrowth/deepseek-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@quietgrowth/connectors-core": "workspace:*",
+    "@quietgrowth/cost-engine": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "@quietgrowth/database": "workspace:*"
+  }
+}

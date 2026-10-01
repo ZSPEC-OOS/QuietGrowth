@@ -3,11 +3,11 @@ import type { Executor, Verifier, ActionRecord, OutcomeEvaluator } from "@quietg
 import { sha256 } from "@quietgrowth/verification";
 import type { Fetcher } from "@quietgrowth/verification";
 import { funnelCounts, type FunnelEvent, type FunnelEventMap } from "@quietgrowth/metrics";
-import { patchFor, type SeoPayload } from "./operations.js";
+import { parseSeoPayload, patchFor, type SeoPayload } from "./operations.js";
 import { prepublishChecks, type KnowledgeItem } from "./checks.js";
 
 export const branchFor = (a: ActionRecord): string => `qg/${a.id.slice(0, 8)}`;
-export const scopeForSeo = (a: ActionRecord): string => GithubConnector.scope((a.payload as SeoPayload).repo, branchFor(a));
+export const scopeForSeo = (a: ActionRecord): string => GithubConnector.scope(parseSeoPayload(a.payload).repo, branchFor(a));
 
 export interface SeoExecutorDeps { github: GithubConnector; knowledge: () => Promise<KnowledgeItem[]>; existingPages: () => Promise<string[]>; allowedHosts: string[] }
 
@@ -15,7 +15,7 @@ export interface SeoExecutorDeps { github: GithubConnector; knowledge: () => Pro
 export class SeoExecutor implements Executor {
   constructor(private readonly d: SeoExecutorDeps) {}
   async execute(a: ActionRecord, token: string) {
-    const p = a.payload as SeoPayload;
+    const p = parseSeoPayload(a.payload);
     const current = await this.d.github.read(p.repo, p.operation.path);
     const patch = patchFor(p.operation, current?.content ?? null, p.marker);
     const checks = prepublishChecks({ text: patch.content === current?.content ? "" : patch.content, knowledge: await this.d.knowledge(), existingPages: await this.d.existingPages(), allowedHosts: this.d.allowedHosts });
@@ -34,7 +34,7 @@ export type PrReader = (repo: RepoRef, prNumber: number) => Promise<{ state: str
 export class PullRequestVerifier implements Verifier {
   constructor(private readonly readPr: PrReader, private readonly expectedContent: (a: ActionRecord) => Promise<{ path: string; content: string }>) {}
   async verify(a: ActionRecord, receipt: { resourceId: string }) {
-    const p = a.payload as SeoPayload;
+    const p = parseSeoPayload(a.payload);
     const pr = await this.readPr(p.repo, Number(receipt.resourceId));
     const exp = await this.expectedContent(a);
     const checks = [

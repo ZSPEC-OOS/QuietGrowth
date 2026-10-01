@@ -26,6 +26,9 @@ importers:
       '@quietgrowth/cell-manager':
         specifier: workspace:*
         version: link:../../packages/cell-manager
+      '@quietgrowth/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       fastify:
         specifier: ^5.0.0
         version: 5.12.5
@@ -60,6 +63,9 @@ importers:
       '@quietgrowth/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@quietgrowth/deepseek-client':
+        specifier: workspace:*
+        version: link:../../packages/deepseek-client
       '@quietgrowth/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -273,6 +279,9 @@ importers:
       '@quietgrowth/verification':
         specifier: workspace:*
         version: link:../verification
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
 
   packages/agent-contracts:
     dependencies:
@@ -378,6 +387,25 @@ importers:
         specifier: ^8.13.0
         version: 8.23.1
     devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
+  packages/deepseek-client:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/cost-engine':
+        specifier: workspace:*
+        version: link:../cost-engine
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.1
+    devDependencies:
+      '@quietgrowth/database':
+        specifier: workspace:*
+        version: link:../database
       '@types/pg':
         specifier: ^8.11.0
         version: 8.23.1

@@ -12,3 +12,5 @@ Invariants enforced by `validateTenantConfig` before any cell starts:
 - secrets appear as references only; values are injected from the secret store at start
 
 **Unverified against a live OpenClaw install:** the config key names are QuietGrowth's own schema. The adapter that maps this onto OpenClaw's native configuration is part of the M0.5 spike.
+
+**Internal secret:** `secrets.internalSecret` is a reference to `HMAC(INTERNAL_SECRET, "internal:"+orgId)` sealed in the secret store by `POST /admin/cells/:orgId/provision`. The cell launcher resolves it into the plugin's `internalSecret` at start; the cell never sees the master.

@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { migrate } from "@quietgrowth/database";
 import { DockerCellManager, buildTenantConfig, type CommandRunner } from "@quietgrowth/cell-manager";
+import { LocalEncryptedSecretStore } from "@quietgrowth/secrets";
 import { buildAdminApp } from "./app.js";
 
 const url = process.env.DATABASE_URL;
@@ -14,6 +16,7 @@ describe.skipIf(!url)("admin app", () => {
   let inspect = "exited|";
   const docker: CommandRunner = { run: async (_c, a) => { cmds.push(a); return { code: 0, stdout: a[0] === "inspect" ? inspect : "", stderr: "" }; } };
   const cells = new DockerCellManager(docker, 21000, undefined, ["reg/openclaw:1"]);
+  const secrets = new LocalEncryptedSecretStore(LocalEncryptedSecretStore.generateKey());
   const H = (t = TOKEN) => ({ authorization: `Bearer ${t}`, "content-type": "application/json" });
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: url, max: 4, options: `-c search_path=${sch},public` });
@@ -26,14 +29,14 @@ describe.skipIf(!url)("admin app", () => {
     await pool.query("INSERT INTO actions (organization_id, domain, type, target_metric, rationale, evidence_json, idempotency_key, status) VALUES ($1,'acquisition','metadata_change','m','r','[]','k','FAILED')", [orgA]);
     await cells.provision(buildTenantConfig({ orgId: orgA, openclawImage: "reg/openclaw:1", controlPlaneUrl: "https://api.test", secretRefs: { deepseekApiKey: "a", internalSecret: "b" }, tokenCeilingPerRun: 100 }));
     await cells.start(orgA);
-    app = await buildAdminApp({ pool, cells, adminToken: TOKEN });
+    app = await buildAdminApp({ pool, cells, adminToken: TOKEN, secrets, internalMaster: "int-master" });
   });
   afterAll(async () => { await app.close(); await pool.query(`DROP SCHEMA ${sch} CASCADE`); await pool.end(); });
 
   it("rejects missing/wrong tokens and refuses to run with a weak configured token", async () => {
     expect((await app.inject({ method: "GET", url: "/admin/tenants" })).statusCode).toBe(401);
     expect((await app.inject({ method: "GET", url: "/admin/tenants", headers: H("wrong") })).statusCode).toBe(401);
-    const weak = await buildAdminApp({ pool, cells, adminToken: "short" });
+    const weak = await buildAdminApp({ pool, cells, adminToken: "short", secrets, internalMaster: "m" });
     expect((await weak.inject({ method: "GET", url: "/admin/tenants", headers: H("short") })).statusCode).toBe(401);
   });
   it("lists tenants with plan, cell state and health signals", async () => {
@@ -53,6 +56,20 @@ describe.skipIf(!url)("admin app", () => {
     expect(r.json().healthy).toBe(true);
     expect((await pool.query("SELECT 1 FROM audit_logs WHERE event='admin:cell_restart'")).rowCount).toBe(1);
     expect((await app.inject({ method: "POST", url: `/admin/cells/${orgB}/restart`, headers: H() })).statusCode).toBe(404);
+  });
+  it("provisioning validates config (no :latest), is idempotent, records the cell and audits", async () => {
+    const body = { openclawImage: "reg/openclaw:1", controlPlaneUrl: "https://api.test", deepseekSecretRef: "sec_deepseek_x" };
+    expect((await app.inject({ method: "POST", url: `/admin/cells/${orgB}/provision`, headers: H(), payload: JSON.stringify({ ...body, openclawImage: "reg/openclaw:latest" }) })).statusCode).toBe(422);
+    const r1 = await app.inject({ method: "POST", url: `/admin/cells/${orgB}/provision`, headers: H(), payload: JSON.stringify(body) });
+    const r2 = await app.inject({ method: "POST", url: `/admin/cells/${orgB}/provision`, headers: H(), payload: JSON.stringify(body) });
+    expect(r1.statusCode).toBe(201); expect(r2.json().instanceId).toBe(r1.json().instanceId);
+    expect((await pool.query("SELECT image, port FROM runtime_cells WHERE organization_id=$1", [orgB])).rows).toHaveLength(1);
+    expect(cmds.filter((c) => c[0] === "create").length).toBe(2); // orgA in setup + orgB once
+    const createCall = cmds.filter((c) => c[0] === "create").at(-1)!.join(" ");
+    const cfg = JSON.parse(Buffer.from(/QG_TENANT_CONFIG=(\S+)/.exec(createCall)![1]!, "base64").toString());
+    expect(cfg.secrets.internalSecret).toMatch(/^sec_internal_/); // a reference, never the value
+    expect(createCall).not.toContain(createHmac("sha256", "int-master").update(`internal:${orgB}`).digest("base64url"));
+    expect((await app.inject({ method: "POST", url: "/admin/cells/00000000-0000-0000-0000-000000000009/provision", headers: H(), payload: JSON.stringify(body) })).statusCode).toBe(404);
   });
   it("suspension updates the subscription, stops the cell, requires a reason, and is audited", async () => {
     expect((await app.inject({ method: "POST", url: `/admin/tenants/${orgA}/status`, headers: H(), payload: JSON.stringify({ status: "suspended", reason: "x" }) })).statusCode).toBe(400);

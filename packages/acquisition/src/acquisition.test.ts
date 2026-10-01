@@ -5,7 +5,7 @@ import type { HttpRequest, HttpResponse } from "@quietgrowth/connectors-core";
 import { ZERO_SPEND_POLICY } from "@quietgrowth/policy-engine";
 import { GrowthEngine, MemoryActionStore, type NewAction } from "@quietgrowth/growth-engine";
 import { sha256 } from "@quietgrowth/verification";
-import { SeoExecutor, PullRequestVerifier, FunnelOutcomeEvaluator, applyOperation, branchFor, candidateFromSignal, checkLinks, policyTypeFor, prepublishChecks, scopeForSeo, similarity, type SeoPayload } from "./index.js";
+import { parseSeoPayload, SeoExecutor, PullRequestVerifier, FunnelOutcomeEvaluator, applyOperation, branchFor, candidateFromSignal, checkLinks, policyTypeFor, prepublishChecks, scopeForSeo, similarity, type SeoPayload } from "./index.js";
 
 const page = `<html><head><title>Old</title><meta name="description" content="old"></head><body><p>Our CRM helps teams</p></body></html>`;
 const marker = "qg:a1";
@@ -49,6 +49,20 @@ describe("pre-publish checks", () => {
     expect(checkLinks("see https://evil.biz/x", ["x.com"])[0]!.ok).toBe(false);
     expect(checkLinks("[a](/ok) [b](/../x)", ["x.com"]).find((c) => c.name === "internal_links_wellformed")!.ok).toBe(false);
   });
+});
+
+describe("parseSeoPayload (agent output is untrusted)", () => {
+  const good = { repo: { owner: "o", repo: "r", baseBranch: "main" }, targetUrl: "https://x.com/p", marker: "qg:k", operation: { op: "metadata", path: "content/p.html", title: "T" } };
+  it("accepts a well-formed payload", () => { expect(parseSeoPayload(good).operation.op).toBe("metadata"); });
+  it.each([
+    ["path traversal", { ...good, operation: { op: "metadata", path: "../x" } }],
+    ["absolute path", { ...good, operation: { op: "metadata", path: "/etc/passwd" } }],
+    ["repo path injection", { ...good, repo: { owner: "o", repo: "r/../../x", baseBranch: "main" } }],
+    ["unknown operation", { ...good, operation: { op: "delete_everything", path: "a" } }],
+    ["extra fields", { ...good, extra: 1 }],
+    ["non-relative link target", { ...good, operation: { op: "internal_link", path: "a.html", anchorText: "x", targetPath: "https://evil.com" } }],
+    ["null", null],
+  ])("rejects %s", (_n, bad) => { expect(() => parseSeoPayload(bad)).toThrow("invalid SEO payload"); });
 });
 
 describe("candidateFromSignal", () => {

@@ -28,7 +28,8 @@
     "@quietgrowth/verification": "workspace:*",
     "@quietgrowth/connectors-core": "workspace:*",
     "@quietgrowth/runtime-manager": "workspace:*",
-    "@quietgrowth/entitlements": "workspace:*"
+    "@quietgrowth/entitlements": "workspace:*",
+    "@quietgrowth/deepseek-client": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { migrate } from "@quietgrowth/database";
 import { LocalEncryptedSecretStore } from "@quietgrowth/secrets";
 import { buildApp } from "./app.js";
+import { internalSecretFor } from "./auth.js";
 
 const url = process.env.DATABASE_URL;
 const schema = `t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
@@ -141,9 +142,24 @@ describe.skipIf(!url)("control-plane API", () => {
     expect((await call("POST", "/v1/integrations/evil/connect", s.token, { credential: "x" })).status).toBe(400);
   });
 
+  it("DeepSeek BYOK test: validates the stored key, degrades the integration when rejected, never echoes the key", async () => {
+    const s = await signup("owner@ds.com");
+    expect((await call("POST", "/v1/integrations/deepseek/test", s.token)).status).toBe(404);
+    await call("POST", "/v1/integrations/deepseek/connect", s.token, { credential: "sk-ds-secret-key-123456" });
+    const good = await buildApp({ adminPool: pool, pool, sessionSecret: "sess", internalSecret: "int", authSecret: "auth", secrets, resolver: pub, fetchImpl: async () => ({ status: 200, headers: {}, body: "" }), executor: { execute: async () => { throw new Error("n"); } }, verifier: { verify: async () => ({ ok: true, checks: [] }) }, outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) }, scopeFor: (a) => a.id, http: async () => ({ status: 200, headers: {}, text: "", json: { choices: [{ message: { content: "p" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } } }) });
+    const bad = await buildApp({ adminPool: pool, pool, sessionSecret: "sess", internalSecret: "int", authSecret: "auth", secrets, resolver: pub, fetchImpl: async () => ({ status: 200, headers: {}, body: "" }), executor: { execute: async () => { throw new Error("n"); } }, verifier: { verify: async () => ({ ok: true, checks: [] }) }, outcomes: { evaluate: async () => ({ label: "observational", summary: {}, guardrailsHeld: true }) }, scopeFor: (a) => a.id, http: async () => ({ status: 401, headers: {}, text: "", json: null }) });
+    const h = { authorization: `Bearer ${s.token}`, "content-type": "application/json" };
+    const okRes = await good.inject({ method: "POST", url: "/v1/integrations/deepseek/test", headers: h });
+    expect(okRes.statusCode).toBe(200);
+    const badRes = await bad.inject({ method: "POST", url: "/v1/integrations/deepseek/test", headers: h });
+    expect(badRes.statusCode).toBe(422); expect(badRes.body).not.toContain("sk-ds");
+    expect((await pool.query("SELECT status FROM integrations WHERE organization_id=$1 AND provider='deepseek'", [s.orgId])).rows[0].status).toBe("degraded");
+    await good.close(); await bad.close();
+  });
+
   it("internal endpoints require the internal secret and redact payloads", async () => {
     const s = await signup("owner@j.com");
-    const hit = (secret?: string) => app.inject({ method: "POST", url: "/internal/openclaw/events", headers: { "x-internal-secret": secret ?? "", "content-type": "application/json" }, payload: JSON.stringify({ orgId: s.orgId, type: "tool_call", payload: { apiKey: "abc", note: "ok" } }) });
+    const hit = (secret?: string) => app.inject({ method: "POST", url: "/internal/openclaw/events", headers: { "x-internal-secret": secret === "int" ? internalSecretFor("int", s.orgId) : secret ?? "", "content-type": "application/json" }, payload: JSON.stringify({ orgId: s.orgId, type: "tool_call", payload: { apiKey: "abc", note: "ok" } }) });
     expect((await hit()).statusCode).toBe(401); expect((await hit("wrong")).statusCode).toBe(401);
     expect((await hit("int")).statusCode).toBe(202);
     const row = (await pool.query("SELECT detail FROM audit_logs WHERE event='tool_call'")).rows[0];
@@ -177,7 +193,7 @@ describe.skipIf(!url)("agent tool router", () => {
 
   const contract = (agent: string, o = {}) => ({ contractVersion: 1, contractId: "c", orgId: org, actionId: "a", agent, task: "t", context: {}, untrusted: [], maxTokens: 1000, ...o });
   const tool = (name: string, agent: string, args = {}, secret = "int", orgId = org, c: unknown = contract(agent)) =>
-    app.inject({ method: "POST", url: `/internal/tools/${name}`, headers: { "x-internal-secret": secret, "content-type": "application/json" }, payload: JSON.stringify({ orgId, contract: c, args, callId: "1" }) });
+    app.inject({ method: "POST", url: `/internal/tools/${name}`, headers: { "x-internal-secret": secret === "int" ? internalSecretFor("int", org) : secret, "content-type": "application/json" }, payload: JSON.stringify({ orgId, contract: c, args, callId: "1" }) });
   const proposal = (o = {}) => ({ type: "metadata_change", domain: "acquisition", targetMetric: "signups", guardrailMetrics: ["bounce"], rationale: "r", evidenceRefs: ["e1"], expectedIncrementalImpact: 0.2, confidence: 0.5, idempotencyKey: `k${Math.random()}`, ...o });
 
   it("requires the internal secret", async () => { expect((await tool("read_site", "research", {}, "nope")).statusCode).toBe(401); });
@@ -189,7 +205,11 @@ describe.skipIf(!url)("agent tool router", () => {
   });
   it("proposals cannot choose their own tenant: the contract's org wins and mismatches are denied", async () => {
     const other = (await pool.query("INSERT INTO organizations (name) VALUES ('X') RETURNING id")).rows[0].id;
-    expect((await tool("propose_action", "director", proposal(), "int", other)).statusCode).toBe(403);
+    // org A's cell secret presented for org B's id is rejected outright (per-tenant internal secrets)
+    expect((await tool("propose_action", "director", proposal(), "int", other)).statusCode).toBe(401);
+    // with a valid secret for B but a contract naming A, the org mismatch is still denied
+    const forB = internalSecretFor("int", other);
+    expect((await tool("propose_action", "director", proposal(), forB, other)).statusCode).toBe(403);
   });
   it("read-only agents cannot propose or mutate; mutation tools are never executed through the tool API", async () => {
     expect((await tool("propose_action", "research", proposal())).statusCode).toBe(403);

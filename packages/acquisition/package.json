@@ -18,6 +18,7 @@
     "@quietgrowth/connectors-core": "workspace:*",
     "@quietgrowth/verification": "workspace:*",
     "@quietgrowth/metrics": "workspace:*",
-    "@quietgrowth/policy-engine": "workspace:*"
+    "@quietgrowth/policy-engine": "workspace:*",
+    "zod": "^3.23.8"
   }
 }

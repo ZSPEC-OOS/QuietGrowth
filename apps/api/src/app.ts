@@ -14,9 +14,11 @@ import { randomUUID } from "node:crypto";
 import { assertCanAddProduct, assertFeature, assertModelCap, EntitlementError } from "@quietgrowth/entitlements";
 import { loadReadiness } from "@quietgrowth/growth-engine";
 import { assignVariant } from "@quietgrowth/experiments";
+import { DeepSeekClient } from "@quietgrowth/deepseek-client";
+import { fetchClient, type HttpClient } from "@quietgrowth/connectors-core";
 import { runTool } from "./tools.js";
 import { ToolDeniedError } from "@quietgrowth/runtime-manager";
-import { hashApiKey, hashPassword, newApiKey, signSession, verifyPassword, verifySession, type Role, type Session } from "./auth.js";
+import { hashApiKey, hashPassword, internalSecretFor, secretsEqual, newApiKey, signSession, verifyPassword, verifySession, type Role, type Session } from "./auth.js";
 
 export interface AppDeps {
   /** Owner-privileged pool: used only for signup/login and API-key lookup, never for tenant data. */
@@ -35,6 +37,8 @@ export interface AppDeps {
   scopeFor: (a: ActionRecord) => string;
   now?: () => number;
   logger?: boolean;
+  /** Outbound HTTP for provider checks (DeepSeek key test). Defaults to global fetch. */
+  http?: HttpClient;
 }
 
 declare module "fastify" {
@@ -77,8 +81,10 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     req.session = s;
     return s;
   };
-  const requireInternal = (req: FastifyRequest) => {
-    if (req.headers["x-internal-secret"] !== d.internalSecret) throw Object.assign(new Error("unauthorized"), { statusCode: 401 });
+  /** Authenticates a tenant cell for exactly the organisation it claims; a secret for org A never works for org B. */
+  const requireInternal = (req: FastifyRequest, orgId: string) => {
+    const h = req.headers["x-internal-secret"];
+    if (typeof h !== "string" || !secretsEqual(h, internalSecretFor(d.internalSecret, orgId))) throw Object.assign(new Error("unauthorized"), { statusCode: 401 });
   };
   const tenant = <T>(s: Session, fn: (c: PoolClient) => Promise<T>) => withOrg(d.pool, s.orgId, fn);
 
@@ -352,6 +358,16 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     });
     return reply.code(201).send({ provider, status: "healthy" }); // credential never echoed
   });
+  // BYOK validation (MR §21.1): one-token call with the stored key; the key is never returned.
+  app.post("/v1/integrations/deepseek/test", async (req, reply) => {
+    const s = await requireSession(req, "admin");
+    const ref = await tenant(s, async (c) => (await c.query("SELECT cr.secret_ref FROM credential_references cr JOIN integrations i ON i.id=cr.integration_id WHERE i.organization_id=$1 AND i.provider='deepseek' ORDER BY cr.created_at DESC LIMIT 1", [s.orgId])).rows[0]?.secret_ref as string | undefined);
+    if (!ref) return reply.code(404).send({ error: "deepseek_not_connected" });
+    const res = await new DeepSeekClient(d.http ?? fetchClient, await d.secrets.get(s.orgId, ref)).testKey();
+    await tenant(s, (c) => c.query("UPDATE integrations SET status=$2, last_sync_at=now() WHERE organization_id=$1 AND provider='deepseek'", [s.orgId, res.ok ? "healthy" : "degraded"]));
+    return res.ok ? { ok: true } : reply.code(422).send({ ok: false, reason: res.reason });
+  });
+
   app.get("/v1/integrations", async (req) => {
     const s = await requireSession(req);
     return tenant(s, async (c) => ({ integrations: (await c.query("SELECT provider, status, scopes, last_sync_at FROM integrations WHERE organization_id=$1 ORDER BY provider", [s.orgId])).rows }));
@@ -434,23 +450,23 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
 
   // ---- internal ----
   app.post("/internal/openclaw/events", async (req, reply) => {
-    requireInternal(req);
     const b = z.object({ orgId: z.string().uuid(), actionId: z.string().uuid().optional(), type: z.string().max(80), payload: z.record(z.unknown()).default({}) }).parse(req.body);
+    requireInternal(req, b.orgId);
     await withOrg(d.pool, b.orgId, (c) => c.query("INSERT INTO audit_logs (organization_id, actor, event, subject_type, subject_id, detail) VALUES ($1,'openclaw',$2,'action',$3,$4)", [b.orgId, b.type, b.actionId ?? null, redact(b.payload)]));
     return reply.code(202).send({ ok: true });
   });
   app.post("/internal/tools/:tool", async (req, reply) => {
-    requireInternal(req);
     const { tool } = z.object({ tool: z.string().max(60) }).parse(req.params);
     const b = z.object({ orgId: z.string().uuid(), contract: z.unknown(), args: z.record(z.unknown()).default({}), callId: z.string().min(1).max(100) }).parse(req.body);
+    requireInternal(req, b.orgId);
     const r = await withOrg(d.pool, b.orgId, (c) => runTool(b.contract, { callId: b.callId, tool, args: b.args }, { c, engine: engineFor(c, b.orgId), orgId: b.orgId, now }));
     return reply.code(r.status).send({ callId: b.callId, ok: r.ok, data: r.data, error: r.error });
   });
 
   app.post("/internal/verify/:actionId", async (req) => {
-    requireInternal(req);
     const { actionId } = z.object({ actionId: z.string().uuid() }).parse(req.params);
     const { orgId } = z.object({ orgId: z.string().uuid() }).parse(req.body);
+    requireInternal(req, orgId);
     return withOrg(d.pool, orgId, async (c) => {
       const a = await new PgActionStore(c).get(orgId, actionId);
       if (!a) throw Object.assign(new Error("not found"), { statusCode: 404 });

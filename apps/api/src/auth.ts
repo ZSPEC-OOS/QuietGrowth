@@ -39,3 +39,14 @@ export const newApiKey = (): { key: string; hash: string; prefix: string } => {
   return { key, hash: hashApiKey(key), prefix: key.slice(0, 12) };
 };
 export const hashApiKey = (key: string): string => createHash("sha256").update(key).digest("hex");
+
+/**
+ * Per-tenant secret for /internal/* calls. A cell only holds the secret derived for its own organisation, so a
+ * compromised cell cannot call the control plane as another tenant even though the master is shared server-side.
+ */
+export const internalSecretFor = (master: string, orgId: string): string => createHmac("sha256", master).update(`internal:${orgId}`).digest("base64url");
+
+export function secretsEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}

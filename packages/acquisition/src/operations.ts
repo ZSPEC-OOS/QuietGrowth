@@ -2,6 +2,7 @@ import type { RepoRef, FilePatch } from "@quietgrowth/connector-cms";
 import type { SeoSignal } from "@quietgrowth/connector-gsc";
 import type { NewAction } from "@quietgrowth/growth-engine";
 import { valueScore } from "@quietgrowth/domain";
+import { z } from "zod";
 
 // Bounded SEO operations (MR §10.1 step 4): one operation per action.
 export type SeoOperation =
@@ -67,4 +68,25 @@ export function candidateFromSignal(s: SeoSignal, orgId: string, funnelStage = "
     ease: s.kind === "low_ctr" ? 0.9 : 0.6, timeToSignal: 0.5, reversibility: 0.9, strategicFit: 0.7, evidenceQualityCap: 0.8,
   });
   return { dedupeKey: s.dedupeKey, funnelStage, score, kind: s.kind, evidence: { orgId, ...s } };
+}
+
+const relPath = z.string().min(1).max(300).regex(/^[\w./@-]+$/).refine((p) => !p.startsWith("/") && !p.split("/").includes(".."), "invalid path");
+const repoPart = z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/);
+export const SeoPayloadSchema = z.object({
+  repo: z.object({ owner: repoPart, repo: repoPart, baseBranch: z.string().regex(/^[A-Za-z0-9_./-]{1,200}$/) }).strict(),
+  targetUrl: z.string().url().max(2000),
+  marker: z.string().min(1).max(200).regex(/^[\w:.@/-]+$/),
+  operation: z.discriminatedUnion("op", [
+    z.object({ op: z.literal("metadata"), path: relPath, title: z.string().max(200).optional(), description: z.string().max(400).optional() }).strict(),
+    z.object({ op: z.literal("internal_link"), path: relPath, anchorText: z.string().min(1).max(200), targetPath: z.string().max(300).regex(/^\/[\w./#?=&%-]*$/) }).strict(),
+    z.object({ op: z.literal("faq_schema"), path: relPath, faqs: z.array(z.object({ q: z.string().max(300), a: z.string().max(2000) })).min(1).max(20) }).strict(),
+    z.object({ op: z.literal("new_intent_page"), path: relPath, markdown: z.string().max(200_000) }).strict(),
+  ]),
+}).strict();
+
+/** Agent-supplied payloads are untrusted input: validate before anything is built from them. */
+export function parseSeoPayload(raw: unknown): SeoPayload {
+  const r = SeoPayloadSchema.safeParse(raw);
+  if (!r.success) throw new Error(`invalid SEO payload: ${r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  return r.data as SeoPayload;
 }
