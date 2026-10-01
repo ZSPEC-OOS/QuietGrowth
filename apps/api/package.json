@@ -3,13 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "dist/server.js",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/server.js",
-    "build:vercel": "node scripts/build-vercel.mjs"
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "fastify": "^5.0.0",
@@ -34,10 +33,20 @@
     "@quietgrowth/worker": "workspace:*"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0",
-    "esbuild": "^0.24.0"
+    "@types/pg": "^8.11.0"
   },
   "engines": {
     "node": "22.x"
+  },
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./production": {
+      "types": "./dist/production.d.ts",
+      "default": "./dist/production.js"
+    }
   }
 }

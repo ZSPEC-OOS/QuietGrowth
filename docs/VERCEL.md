@@ -1,46 +1,56 @@
-# Deploying to Vercel
+# Deploying to Vercel (single project)
 
-QuietGrowth is two Vercel projects from one repository. Everything that needs a long-running process or a container runtime stays **off** Vercel.
+One Vercel project serves everything: the Next.js UI, the control-plane API under `/api/*`, and the background loop via Vercel Cron.
 
-| Component | Where | Why |
-|---|---|---|
-| `apps/web` (Next.js) | Vercel project **quietgrowth-web** | Standard Next.js; no workspace dependencies |
-| `apps/api` (Fastify) | Vercel project **quietgrowth-api** (Node 22 function, Build Output API v3) | Stateless HTTP; one warm Fastify instance per container |
-| Background loop | **Vercel Cron → `GET /cron/tick`** | Replaces the BullMQ worker (no Redis needed). Same idempotent handlers, time-boxed per tick |
-| Postgres | Neon / Vercel Postgres / any managed Postgres | Use a pooled connection string for runtime |
-| `apps/admin`, OpenClaw tenant cells | A container host (Fly, Railway, ECS, VM) | Docker/long-running; cannot run on Vercel |
+```
+Browser ──► Next.js (apps/web) ─┬─ pages / server components / server actions ─┐
+                                ├─ /api/[...path]  (public API: SDK, cells)    ├─► in-process Fastify app ──► Postgres
+                                └─ /api/cron/tick  (Vercel Cron, bearer secret)┘     (packages/*, @quietgrowth/api)
+```
 
-This split gives the **self-host/BYOK "light" mode**: SEO/lifecycle/experiments/funnel with rule-based drafting and no agent runtime (`RUNTIME_ATTESTED=1`). Agent execution (OpenClaw cells) needs the container host and is out of scope for Vercel.
+- The Fastify app (`@quietgrowth/api`) is created once per warm instance (`createProductionApp`) and called with `inject`: no network hop between UI and API, one DB pool, one set of env vars.
+- The public API keeps its paths, now prefixed: `https://<app>/api/healthz`, `/api/v1/events`, `/api/internal/tools/:tool`, `/api/cron/tick`. Point the SDK at `https://<app>/api` and tenant cells' `controlPlaneUrl` at the same.
+- Setting `API_URL` makes the web app call a remote API instead (split deployment). Leave it unset for the single deployment.
+- Not on Vercel: `apps/admin`, OpenClaw tenant cells and the BullMQ worker (`apps/worker`). They need a container host and are optional. Without them you get the **self-host/BYOK "light" mode**: funnel, SEO/lifecycle/experiment proposals with rule-based drafting, no agent runtime (`RUNTIME_ATTESTED=1`).
 
 ## 1. Database
-1. Create a Postgres database. Keep two URLs: pooled → `DATABASE_URL`, direct → `DATABASE_URL_UNPOOLED`.
-2. The login role must be allowed to create roles/extensions-free objects (migrations create `qg_app` / `qg_admin` and `GRANT qg_app TO CURRENT_USER`, so the app can `SET LOCAL ROLE qg_app`). It must **not** be a superuser in production (superusers bypass RLS).
-3. Migrations run either manually (`DATABASE_URL=<direct> pnpm --filter @quietgrowth/database migrate`) or during the API production build with `RUN_MIGRATIONS=1`.
+1. Create a Postgres database (Neon / Vercel Postgres / any managed). Keep **two** URLs: pooled → `DATABASE_URL`, direct → `DATABASE_URL_UNPOOLED`.
+2. The login role must **not** be a superuser (superusers bypass RLS). It needs permission to create roles (migrations create `qg_app` and `qg_admin`) and the migration `GRANT qg_app TO CURRENT_USER` lets the app `SET LOCAL ROLE qg_app` per transaction. Transaction-mode poolers support this.
 
-## 2. API project
-- Import the repo; **Root Directory: `apps/api`**; framework preset *Other*. `apps/api/vercel.json` sets install and build commands (`node scripts/vercel-build.mjs` → builds workspace packages, optional migrations, writes `.vercel/output`).
-- Environment variables (Production and Preview; use distinct values per environment):
-  `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `SESSION_SECRET`, `INTERNAL_SECRET`, `ACTION_AUTH_SECRET`, `SECRET_MASTER_KEY`, `CRON_SECRET`, optional `PG_POOL_MAX`, `TICK_BUDGET_MS`, `RUN_MIGRATIONS`, `RUNTIME_ATTESTED`.
-- Generate secrets with `openssl rand -base64 32`. **Back up `SECRET_MASTER_KEY` outside Vercel**: losing it makes stored connector credentials unreadable.
-- Cron: `config.json` registers `*/15 * * * *` for `/cron/tick`. Sub-daily schedules need a Pro plan; on Hobby, change the schedule in `scripts/build-vercel.mjs` to daily or trigger the endpoint from an external scheduler with the bearer secret. `CRON_SECRET` is injected automatically by Vercel Cron when the variable exists.
-- A tick is limited by `maxDuration` (60s) and `TICK_BUDGET_MS`; with many tenants it resumes on the next tick (handlers are idempotent). Move to the container worker (`apps/worker`) when tenants outgrow this.
+## 2. Project settings
+- Import the repo. **Root Directory: `apps/web`**, framework Next.js. `apps/web/vercel.json` already sets:
+  - install: `cd ../.. && pnpm install --frozen-lockfile`
+  - build: `node scripts/vercel-build.mjs` (builds workspace packages, optionally migrates, runs `next build` through Turborepo)
+  - cron: `*/15 * * * *` → `/api/cron/tick`
+- Environment variables (Production and Preview; use distinct values per environment; generate with `openssl rand -base64 32`):
 
-## 3. Web project
-- **Root Directory: `apps/web`**, framework Next.js (`apps/web/vercel.json`).
-- Environment: `API_URL` = the API project's production URL. The browser never calls the API directly; server components and server actions do, using the httpOnly session cookie, so no CORS configuration is needed.
-- Put both projects behind the same parent domain if you want first-party cookies on a custom domain.
+| Variable | Required | Notes |
+|---|---|---|
+| `DATABASE_URL` | yes | pooled connection string |
+| `DATABASE_URL_UNPOOLED` | for migrations | direct connection |
+| `SESSION_SECRET`, `ACTION_AUTH_SECRET` | yes | ≥ 32 random bytes each |
+| `INTERNAL_SECRET` | yes | master for per-tenant cell secrets |
+| `SECRET_MASTER_KEY` | yes | base64, 32 bytes. **Back it up outside Vercel**; losing it makes stored connector credentials unreadable |
+| `CRON_SECRET` | yes | ≥ 24 chars. Vercel sends it as `Authorization: Bearer …` to cron routes |
+| `RUN_MIGRATIONS` | optional | `1` = run migrations during the **production** build |
+| `RUNTIME_ATTESTED` | optional | `1` for light mode without tenant cells |
+| `PG_POOL_MAX`, `TICK_BUDGET_MS`, `QG_LOG` | optional | defaults 3, 45000, on |
 
-## 4. Verify before pointing users at it
+Without the required secrets the deployment fails closed: `/api/*` answers `503 {"error":"service_unavailable"}` and the real reason appears only in function logs.
+
+## 3. Cron tick
+`/api/cron/tick` runs the same idempotent handlers as the BullMQ worker (reconcile billing, detect/propose, lifecycle, execute, experiments, evaluate) for every active tenant, stopping at `TICK_BUDGET_MS` (function limit 60 s) and resuming on the next tick. Sub-daily schedules need a Pro plan; on Hobby use a daily cron or an external scheduler calling the endpoint with the bearer secret. Move to the container worker when tenant count outgrows one tick.
+
+## 4. Verify
+Local, production-mode check of exactly this topology (one Next.js process, real Postgres, headless Chromium; also boots a deliberately misconfigured instance and expects the 503):
 ```bash
-pnpm turbo run build --filter=@quietgrowth/api...
-cd apps/api && pnpm build:vercel                       # emits .vercel/output
-DATABASE_URL=<throwaway db> node scripts/smoke-vercel.mjs   # loads the bundle as the launcher would; checks 503-on-misconfig, signup, auth, cron
+pnpm build && DATABASE_URL=<throwaway db> node tests/e2e/run.mjs
 ```
-After deploy: `GET <api>/healthz`; sign up through the web app; call `GET <api>/cron/tick` with and without the bearer secret (expect 200 / 401).
+After the first real deploy: `GET /api/healthz`; sign up in the UI; `GET /api/cron/tick` with and without the bearer secret (expect 200 / 401); check function logs for the boot line and no errors.
 
-## Limits and caveats
-- **Not verified on Vercel itself**: no deployment was possible from the authoring environment (no Vercel CLI/credentials). The function bundle, routing config and cron registration follow the Build Output API v3 format and were exercised locally by `smoke-vercel.mjs`; confirm the first deployment end to end (route rewrites preserving the original path, cron invocation, function logs).
-- Cold starts include booting Fastify and one DB connection; keep `PG_POOL_MAX` small and use the provider's pooler to avoid exhausting connections under concurrency.
-- Request-level rate limiting is not implemented in the app: enable Vercel Firewall / rate limiting on `/v1/login` and `/v1/signup`.
-- The cron tick uses fail-closed executors: proposals, approvals, readiness and verification run, but repository/email writes require per-organisation connector wiring (see STATUS.md).
-- No Redis is used on Vercel. `REDIS_URL` is only for the container worker.
+## Caveats
+- **No deployment was performed from the authoring environment** (no Vercel CLI or credentials). Local `next build` + `next start` and the E2E exercise the same code path, and the build output's file trace was inspected (`fastify`, `pg`, `pino` are externalised and traced; workspace packages are bundled), but confirm the first deployment end to end, particularly function size/trace completeness and the cron invocation.
+- Cold starts include booting Fastify and one DB connection; keep `PG_POOL_MAX` small and use the provider's pooler.
+- No in-app rate limiting: enable Vercel Firewall rules for `/api/v1/login` and `/api/v1/signup`.
+- The public `/api/internal/*` routes are reachable from the internet by design (tenant cells call them); they require the per-tenant derived secret and answer 401 otherwise.
+- Repo/email writes still fail closed until per-organisation connectors are wired (see STATUS.md); the tick still proposes, approves, gates on readiness and verifies.

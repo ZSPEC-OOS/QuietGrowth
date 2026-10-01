@@ -2,5 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm run build"
+  "buildCommand": "node scripts/vercel-build.mjs",
+  "crons": [{ "path": "/api/cron/tick", "schedule": "*/15 * * * *" }]
 }

@@ -1,6 +1,6 @@
 # Deployment
 
-For a hosted Vercel setup (web + API + cron, no containers) see [VERCEL.md](VERCEL.md). This page covers the container topology.
+For a single-project Vercel setup (UI + API + cron, no containers) see [VERCEL.md](VERCEL.md). This page covers the container topology.
 
 ## Database roles
 | Role | Purpose | Notes |

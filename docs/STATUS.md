@@ -1,6 +1,6 @@
 # Implementation status
 
-Verified in the authoring environment: `pnpm check` (typecheck + **345 tests**, Postgres 16 and Redis available), `pnpm build` (all apps and packages, including `next build`), and a real-stack browser E2E (`node tests/e2e/run.mjs`: Postgres + API + Next.js + headless Chromium, 13/13 steps).
+Verified in the authoring environment: `pnpm check` (typecheck + **353 tests**, Postgres 16 and Redis available), `pnpm build` (all apps and packages, including `next build`), and a real-stack browser E2E (`node tests/e2e/run.mjs`: Postgres + API + Next.js + headless Chromium, 14/14 steps).
 
 ## What is built, by milestone (plan: docs/IMPLEMENTATION_PLAN.md)
 
@@ -39,7 +39,7 @@ Verified in the authoring environment: `pnpm check` (typecheck + **345 tests**, 
 4. Stripe/GSC/GA4/GitHub request shapes follow public API documentation and are tested only with fakes; run each against sandbox accounts.
 
 ## Vercel readiness
-Web (Next.js) and API (Fastify, Build Output API bundle) have Vercel configuration, a queue-free cron tick replaces the BullMQ worker, and a smoke test loads the built function as the launcher would. **No real Vercel deployment was performed**; see docs/VERCEL.md for the first-deploy checks.
+Single project: the Next.js app serves the UI and mounts the API in-process under `/api`, with Vercel Cron driving a queue-free tick. Verified locally in production mode by the E2E (14/14, including fail-closed 503 on misconfiguration and the cron/internal/method/size guards). **No real Vercel deployment was performed**; see docs/VERCEL.md for the first-deploy checks.
 
 ## Not implemented (explicit)
 OAuth connect flows; scheduled post-merge live verification; ad/Google Ads client; helpdesk connector (P2); object storage use (MinIO is provisioned but unused); OpenTelemetry/error-tracker wiring (env vars reserved); session revocation, login rate limiting and master-key rotation (see SECURITY.md); QuietGrowth's own billing for hosted plans.

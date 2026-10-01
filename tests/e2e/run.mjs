@@ -1,5 +1,7 @@
-// Real-stack E2E: Postgres + API + Next.js + headless Chromium. No mocks of QuietGrowth code.
+// Real-stack E2E of the SINGLE deployment: Postgres + one Next.js process (UI + in-process API under /api) + headless Chromium.
+// No mocks of QuietGrowth code.
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chromium } from "playwright-core";
 import pg from "pg";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -9,7 +11,9 @@ const ADMIN = process.env.DATABASE_URL ?? "postgres://postgres:quietgrowth@local
 const DB = "qg_e2e";
 const DBURL = ADMIN.replace(/\/[^/]+$/, `/${DB}`);
 // Next builds redirect URLs from `localhost`, so the browser must use the same host or the session cookie will not match.
-const API = "http://127.0.0.1:3201", WEB = "http://localhost:3200";
+const WEB = "http://localhost:3200", API = `${WEB}/api`;
+const CRON_SECRET = "c".repeat(32);
+const ENV = { DATABASE_URL: DBURL, SESSION_SECRET: "e2e-session-".padEnd(32, "x"), INTERNAL_SECRET: "e2e-internal-".padEnd(32, "x"), ACTION_AUTH_SECRET: "e2e-auth-".padEnd(32, "x"), SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString("base64"), CRON_SECRET, QG_LOG: "0", PG_POOL_MAX: "3" };
 const procs = [];
 
 const run = (cmd, args, env, name) => {
@@ -25,12 +29,19 @@ async function main() {
   const mig = spawn("node", ["packages/database/dist/migrate-cli.js"], { env: { ...process.env, DATABASE_URL: DBURL }, stdio: "inherit" });
   await new Promise((r, j) => mig.on("exit", (c) => (c === 0 ? r() : j(new Error("migrate failed")))));
 
-  run("node", ["apps/api/dist/server.js"], { DATABASE_URL: DBURL, SESSION_SECRET: "e2e-session", INTERNAL_SECRET: "e2e-int", ACTION_AUTH_SECRET: "e2e-auth", SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString("base64"), PORT: "3201" }, "api");
-  run("pnpm", ["--filter", "@quietgrowth/web", "exec", "next", "start", "-p", "3200", "-H", "127.0.0.1"], { API_URL: API, NODE_ENV: "production" }, "web");
-  await waitFor(`${API}/healthz`); await waitFor(`${WEB}/login`);
+  // Misconfigured deployment first: must fail closed with 503 and leak no configuration details.
+  run("pnpm", ["--filter", "@quietgrowth/web", "exec", "next", "start", "-p", "3202", "-H", "127.0.0.1"], { NODE_ENV: "production", DATABASE_URL: "", SESSION_SECRET: "" }, "web-misconfigured");
+  await waitFor("http://127.0.0.1:3202/login");
+  const bad = await fetch("http://127.0.0.1:3202/api/healthz"); assert.equal(bad.status, 503);
+  const badText = await bad.text(); assert.equal(/DATABASE_URL|SESSION_SECRET|ECONN/.test(badText), false); assert.deepEqual(JSON.parse(badText), { error: "service_unavailable" });
+  procs.pop().kill();
+
+  run("pnpm", ["--filter", "@quietgrowth/web", "exec", "next", "start", "-p", "3200", "-H", "127.0.0.1"], { ...ENV, NODE_ENV: "production" }, "web");
+  await waitFor(`${WEB}/login`);
+  assert.equal((await (await fetch(`${API}/healthz`)).json()).ok, true);
 
   const db = new pg.Client({ connectionString: DBURL }); await db.connect();
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? (existsSync("/opt/pw-browsers/chromium-1194/chrome-linux/chrome") ? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" : undefined), args: ["--no-sandbox"] });
   const ctx = await browser.newContext(); const page = await ctx.newPage();
   const results = [];
   const step = async (name, fn) => { try { await fn(); results.push(["PASS", name]); console.log("PASS", name); } catch (e) { results.push(["FAIL", name]); console.error("FAIL", name, "\n", e.message); await page.screenshot({ path: `/tmp/e2e-fail-${results.length}.png` }).catch(() => {}); throw e; } };
@@ -50,7 +61,7 @@ async function main() {
     const c = (await ctx.cookies()).find((x) => x.name === "qg_session"); assert.ok(c?.httpOnly);
   });
   await step("onboarding refuses private/loopback URLs (SSRF guard visible in UI)", async () => {
-    await page.getByLabel("Product URL").fill("http://127.0.0.1:3201/healthz");
+    await page.getByLabel("Product URL").fill("http://127.0.0.1:3200/api/healthz");
     await page.getByRole("button", { name: "Analyse my product" }).click();
     await page.getByText("cannot be analysed").waitFor();
   });
@@ -114,6 +125,19 @@ async function main() {
     await page.getByText("deepseek connected.").waitFor();
     await page.reload(); assert.equal((await page.content()).includes("super-secret"), false);
     const ref = (await db.query("SELECT secret_ref FROM credential_references")).rows[0].secret_ref; assert.match(ref, /^sec_deepseek_/);
+  });
+  await step("single-deployment API surface: /api auth, cron, internal, method and size guards", async () => {
+    assert.equal((await fetch(`${API}/v1/dashboard`)).status, 401);
+    assert.equal((await fetch(`${API}/cron/tick`)).status, 401);
+    assert.equal((await fetch(`${API}/cron/tick`, { headers: { authorization: "Bearer wrong" } })).status, 401);
+    const tick = await fetch(`${API}/cron/tick`, { headers: { authorization: `Bearer ${CRON_SECRET}` } });
+    assert.equal(tick.status, 200); const t = await tick.json();
+    assert.ok(t.orgs >= 1 && t.errors.length === 0 && t.truncated === false, JSON.stringify(t)); assert.equal(t.jobsRun, t.orgs * 6);
+    assert.equal((await fetch(`${API}/internal/tools/read_site`, { method: "POST", headers: { "content-type": "application/json", "x-internal-secret": "nope" }, body: JSON.stringify({ orgId: "00000000-0000-0000-0000-000000000001", contract: {}, callId: "1" }) })).status, 401);
+    assert.equal((await fetch(`${API}/healthz`, { method: "PUT" })).status, 405);
+    assert.equal((await fetch(`${API}/v1/events`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer x", "content-length": "5000000" }, body: "{}" }).catch(() => ({ status: 413 }))).status, 413);
+    assert.equal((await fetch(`${API}/does/not/exist`)).status, 404);
+    const hdr = (await fetch(`${API}/healthz`)).headers; assert.equal(hdr.get("cache-control"), "no-store");
   });
   await step("every main screen renders without server errors", async () => {
     for (const p of ["dashboard", "funnel", "opportunities", "actions", "acquisition", "lifecycle", "experiments", "analytics", "autopilot", "integrations", "product", "settings"]) {
