@@ -2,6 +2,8 @@
 
 Source: *QuietGrowth SaaS Master Reference* (hereafter **MR**), section numbers cited as §n. This plan converts MR §17–§26 into ordered, testable work packages. The repository currently contains only a README; all work is greenfield.
 
+> **Status:** implemented per this plan; see [STATUS.md](STATUS.md) for what is verified, partial, or still open. Deviations: `pg` + SQL migrations instead of Drizzle; `NEEDS_APPROVAL → BLOCKED` added for owner rejection; per-tenant derived internal secrets; shared Postgres-backed secret store.
+
 ## 0. Summary
 
 - **Critical path:** schema + policy engine + action state machine → connector contract → event/billing ingestion → OpenClaw bridge → SEO closed loop (MR §21.4) → measurement. Everything else is parallelisable around this spine.
@@ -15,7 +17,7 @@ Source: *QuietGrowth SaaS Master Reference* (hereafter **MR**), section numbers 
 |---|---|---|
 | Monorepo | pnpm workspaces + Turborepo, TypeScript strict | per MR §17 |
 | API | **Fastify** + Zod (type-provider) | MR offers Fastify or NestJS; Fastify has lower overhead and simpler contract-sharing with Zod |
-| DB access | **Drizzle ORM** + SQL migrations | explicit SQL, straightforward Row-Level Security |
+| DB access | `pg` + plain SQL migrations (Drizzle deferred until query volume justifies it) | explicit SQL, straightforward Row-Level Security |
 | Tenancy in DB | `organization_id` on every tenant table + PostgreSQL RLS (`SET LOCAL app.org_id`) | defence in depth beyond application filters |
 | Queue | Redis + BullMQ | per MR |
 | Auth | Session auth (Auth.js or Better Auth), org membership roles: owner/admin/member | MR §16 identity domain |

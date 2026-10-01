@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "orgId": "00000000-0000-0000-0000-000000000000",
+  "image": "registry.example/openclaw:PINNED_TAG",
+  "model": {
+    "primary": "deepseek/deepseek-flash",
+    "provider": "deepseek",
+    "pinned": true
+  },
+  "gateway": {
+    "bind": "loopback",
+    "authRequired": true
+  },
+  "hostExec": {
+    "default": "deny",
+    "allowlist": []
+  },
+  "agents": {
+    "director": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "propose_action"
+      ],
+      "mutation": false,
+      "maxTokens": 20000
+    },
+    "funnel-analyst": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo"
+      ],
+      "mutation": false,
+      "maxTokens": 20000
+    },
+    "research": {
+      "tools": [
+        "read_site",
+        "web_research"
+      ],
+      "mutation": false,
+      "maxTokens": 20000
+    },
+    "acquisition": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "propose_action",
+        "repo_patch",
+        "cms_publish"
+      ],
+      "mutation": true,
+      "maxTokens": 20000
+    },
+    "lifecycle": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "propose_action",
+        "send_lifecycle_email"
+      ],
+      "mutation": true,
+      "maxTokens": 20000
+    },
+    "conversion": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "propose_action",
+        "write_experiment"
+      ],
+      "mutation": true,
+      "maxTokens": 20000
+    },
+    "product-led-growth": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "propose_action",
+        "repo_patch"
+      ],
+      "mutation": true,
+      "maxTokens": 20000
+    },
+    "paid-search": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "propose_action",
+        "ads_write"
+      ],
+      "mutation": true,
+      "maxTokens": 20000
+    },
+    "verifier": {
+      "tools": [
+        "read_analytics",
+        "read_search_console",
+        "read_billing",
+        "read_site",
+        "read_repo",
+        "trigger_rollback"
+      ],
+      "mutation": true,
+      "maxTokens": 20000
+    }
+  },
+  "plugins": {
+    "quietgrowth-tools": {
+      "controlPlaneUrl": "https://api.quietgrowth.example",
+      "orgId": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+  "secrets": {
+    "deepseekApiKey": "sec_deepseek_REF",
+    "internalSecret": "sec_internal_REF"
+  },
+  "network": {
+    "egress": "deny_by_default",
+    "allow": [
+      "api.quietgrowth.example",
+      "api.deepseek.com"
+    ]
+  }
+}

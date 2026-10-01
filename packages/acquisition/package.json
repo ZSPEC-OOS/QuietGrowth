@@ -1,0 +1,24 @@
+{
+  "name": "@quietgrowth/acquisition",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@quietgrowth/domain": "workspace:*",
+    "@quietgrowth/growth-engine": "workspace:*",
+    "@quietgrowth/connector-cms": "workspace:*",
+    "@quietgrowth/connector-gsc": "workspace:*",
+    "@quietgrowth/connectors-core": "workspace:*",
+    "@quietgrowth/verification": "workspace:*",
+    "@quietgrowth/metrics": "workspace:*",
+    "@quietgrowth/policy-engine": "workspace:*",
+    "zod": "^3.23.8"
+  }
+}

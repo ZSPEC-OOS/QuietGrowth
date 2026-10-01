@@ -1,0 +1,12 @@
+{
+  "name": "@quietgrowth/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@quietgrowth/agent-contracts": "workspace:*", "@quietgrowth/runtime-manager": "workspace:*", "@quietgrowth/opportunity-detectors": "workspace:*",
+    "@quietgrowth/metrics": "workspace:*", "@quietgrowth/experiments": "workspace:*", "@quietgrowth/policy-engine": "workspace:*",
+    "@quietgrowth/growth-engine": "workspace:*", "@quietgrowth/acquisition": "workspace:*", "@quietgrowth/connector-email": "workspace:*"
+  }
+}
