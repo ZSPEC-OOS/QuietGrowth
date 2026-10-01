@@ -8,19 +8,19 @@ For a single-project Vercel setup (UI + API + cron, no containers) see [VERCEL.m
 | table owner (e.g. `qg_owner`) | runs migrations; **not** a superuser | `FORCE ROW LEVEL SECURITY` also binds the owner, so signup/delete set `app.org_id` first |
 | login role used by API/worker | `GRANT qg_app TO <login>` | queries run as `qg_app` through `withOrg` |
 | `qg_app` | NOLOGIN, NOBYPASSRLS | DML on tenant tables per migration grants |
-| `qg_admin` | NOLOGIN, BYPASSRLS | cross-tenant reads for `apps/admin`; grant to a dedicated login role |
+| `qg_admin` | NOLOGIN, BYPASSRLS | cross-tenant reads for the admin surface (`ADMIN_DATABASE_URL`); grant to a dedicated login role |
 
 `DATABASE_URL` must connect as a role that can `SET ROLE qg_app`. Migrations: `pnpm --filter @quietgrowth/database migrate` (idempotent, transactional per file).
 
 ## Processes
-`api` (3001), `web` (3000), `worker` (BullMQ consumer + 15-minute scheduler), `admin` (3002, private network only), Postgres, Redis. `infra/docker-compose.yml` runs all of them on one host with localhost-only bindings; the Dockerfile builds every service (`--build-arg APP=...`). **The compose file validates (`docker compose config`) but the images were not built in the authoring environment (no Docker daemon).**
+One application process (`apps/web`: UI + `/api` + `/api/admin` + `/api/cron/tick`) and Postgres. `infra/docker-compose.yml` runs the app, a one-off `migrate` job, Postgres and a `cron` ticker (calls `/api/cron/tick` every 15 minutes) with localhost-only bindings; one Dockerfile builds the single image. **The compose file validates (`docker compose config`) but the images were not built in the authoring environment (no Docker daemon).**
 
 ## Required configuration
 See `.env.example`. Generate secrets with `openssl rand -base64 32`. `DEEPSEEK_RATE_TABLE` (JSON) must be supplied wherever model usage is metered; rates are never hard-coded.
 
 ## Modes
 - **Self-host / BYOK:** one organisation; set `RUNTIME_ATTESTED=1` to attest the runtime for the readiness check when no tenant cell exists.
-- **Hosted:** provision cells with `POST /admin/cells/:orgId/provision` (pinned image, secret refs only). Suspend with `POST /admin/tenants/:orgId/status`.
+- **Hosted:** provision cells with `POST /api/admin/cells/:orgId/provision` (needs `OPENCLAW_DOCKER=1` on a host with a Docker daemon; elsewhere it answers `503 runtime_unavailable`) (pinned image, secret refs only). Suspend with `POST /api/admin/tenants/:orgId/status`.
 
 ## Go-live checklist
 1. Migrations applied as the owner role; app roles verified non-superuser.

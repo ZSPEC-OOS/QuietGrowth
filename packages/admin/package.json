@@ -3,12 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "dist/server.js",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "start": "node dist/server.js"
+    "test": "vitest run"
   },
   "dependencies": {
     "fastify": "^5.0.0",
@@ -20,5 +19,6 @@
   "devDependencies": {
     "@types/pg": "^8.11.0",
     "@quietgrowth/database": "workspace:*"
-  }
+  },
+  "types": "dist/index.d.ts"
 }

@@ -1,4 +1,4 @@
-// Queue-free surface of the worker (no BullMQ/ioredis): safe to bundle into serverless hosts.
+// Background jobs (queue-free): driven by the cron tick endpoint; idempotent, so partial or repeated ticks are safe.
 export * from "./ports.js";
 export * from "./handlers.js";
 export * from "./drafter.js";

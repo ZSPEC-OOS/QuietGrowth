@@ -7,8 +7,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "start": "node dist/server.js"
+    "test": "vitest run"
   },
   "dependencies": {
     "fastify": "^5.0.0",
@@ -30,7 +29,9 @@
     "@quietgrowth/runtime-manager": "workspace:*",
     "@quietgrowth/entitlements": "workspace:*",
     "@quietgrowth/deepseek-client": "workspace:*",
-    "@quietgrowth/worker": "workspace:*"
+    "@quietgrowth/worker": "workspace:*",
+    "@quietgrowth/admin": "workspace:*",
+    "@quietgrowth/cell-manager": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

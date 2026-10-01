@@ -25,7 +25,7 @@ describe.skipIf(!url)("experiments, lifecycle, sources, suspension", () => {
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: url, max: 6, options: `-c search_path=${sch},public` });
     await pool.query(`CREATE SCHEMA ${sch}`);
-    await migrate(pool, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(pool, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     await pool.query(`GRANT USAGE ON SCHEMA ${sch} TO qg_app`);
   });
   afterAll(async () => { await pool.query(`DROP SCHEMA ${sch} CASCADE`); await pool.end(); });

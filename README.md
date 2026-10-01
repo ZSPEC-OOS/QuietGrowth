@@ -11,21 +11,23 @@ Autonomous SaaS growth operations: observe the funnel, rank evidence-backed oppo
 ```bash
 pnpm install
 cp .env.example .env            # fill SESSION_SECRET, INTERNAL_SECRET, ACTION_AUTH_SECRET, SECRET_MASTER_KEY
-docker compose -f infra/docker-compose.yml up -d postgres redis
-export DATABASE_URL=postgres://postgres:quietgrowth@localhost:5432/quietgrowth REDIS_URL=redis://localhost:6379
+docker compose -f infra/docker-compose.yml up -d postgres
+export DATABASE_URL=postgres://postgres:quietgrowth@localhost:5432/quietgrowth
 pnpm build && pnpm --filter @quietgrowth/database migrate
-pnpm check                      # typecheck + all tests (DB/Redis-backed suites run when the URLs are set)
-node tests/e2e/run.mjs          # real-stack browser E2E (Postgres + API + Next.js + Chromium)
+pnpm check                      # typecheck + all tests (Postgres-backed suites run when DATABASE_URL is set)
+node tests/e2e/run.mjs          # real-stack browser E2E (Postgres + the single Next.js app + Chromium)
 ```
 
-## Layout
+## One deployable
+
+`apps/web` is the only application. It serves the UI, the control-plane API under `/api/*`, the internal admin surface under `/api/admin/*`, and the background loop at `/api/cron/tick` (Vercel Cron, or the `cron` service in compose). Everything else is a library.
 
 | Path | Purpose |
 |---|---|
-| `apps/api` | Control-plane API (auth, onboarding, funnel, events, actions, policy, experiments, agent tool router) |
-| `apps/worker` | Background loop: sync → detect → propose → execute → verify → observe; lifecycle, experiments, billing reconcile |
-| `apps/web` | Customer UI (all MR §19 screens) |
-| `apps/admin` | Internal tenant/runtime operations (cells, incidents, suspension) |
-| `packages/*` | Domain, policy engine, growth engine, connectors, metrics, experiments, verification, secrets, cell manager, OpenClaw adapter, SDK |
-| `openclaw/` | Tenant cell template, per-agent instructions, `quietgrowth-tools` plugin, evals |
-| `infra/` | Dockerfile, compose, CI-adjacent assets |
+| `apps/web` | **The deployable.** Next.js UI + in-process API host |
+| `packages/api` | Control-plane API (auth, onboarding, funnel, events, actions, policy, experiments, agent tool router); `createProductionApp` |
+| `packages/worker` | Background jobs: sync → detect → propose → execute → verify → observe; lifecycle, experiments, billing reconcile; `runTick` |
+| `packages/admin` | Internal tenant/runtime operations (incidents, suspension, cell provisioning) as a Fastify plugin |
+| `packages/*` (rest) | Domain, policy engine, growth engine, connectors, metrics, experiments, verification, secrets, cell manager, OpenClaw adapter, SDK |
+| `openclaw/` | Tenant cell template, per-agent instructions, `quietgrowth-tools` plugin, evals (not deployed with the app) |
+| `infra/` | Dockerfile (one image) and compose (app + Postgres + cron) for self-hosting |

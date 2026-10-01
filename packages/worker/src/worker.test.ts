@@ -1,15 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { Redis } from "ioredis";
 import { fileURLToPath } from "node:url";
 import { migrate, withOrg } from "@quietgrowth/database";
 import { ingestEvents } from "@quietgrowth/connector-product-events";
 import type { GscRow } from "@quietgrowth/connector-gsc";
 import type { RevenueEvent } from "@quietgrowth/connector-billing";
-import { RuleBasedSeoDrafter, createQueue, handlerFor, detectAndPropose, enqueueTick, evaluateDue, executeReady, reconcileBilling, type WorkerDeps } from "./index.js";
+import { RuleBasedSeoDrafter, handlerFor, detectAndPropose, evaluateDue, executeReady, reconcileBilling, type WorkerDeps } from "./index.js";
 
 const url = process.env.DATABASE_URL;
-const redisUrl = process.env.REDIS_URL;
 const schema = `t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 const repo = { owner: "o", repo: "r", baseBranch: "main" };
 const gsc: GscRow[] = [
@@ -39,7 +37,7 @@ describe.skipIf(!url)("worker handlers (postgres)", () => {
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: url, max: 6, options: `-c search_path=${schema},public` });
     await pool.query(`CREATE SCHEMA ${schema}`);
-    await migrate(pool, fileURLToPath(new URL("../../../packages/database/migrations", import.meta.url)));
+    await migrate(pool, fileURLToPath(new URL("../../database/migrations", import.meta.url)));
     await pool.query(`GRANT USAGE ON SCHEMA ${schema} TO qg_app`);
     orgA = (await pool.query("INSERT INTO organizations (name) VALUES ('A') RETURNING id")).rows[0].id;
     orgB = (await pool.query("INSERT INTO organizations (name) VALUES ('B') RETURNING id")).rows[0].id;
@@ -127,23 +125,8 @@ describe.skipIf(!url)("worker handlers (postgres)", () => {
   });
 });
 
-describe.skipIf(!redisUrl)("BullMQ wiring (redis)", () => {
-  it("dedupes repeated ticks within a bucket and processes one job per org+job", async () => {
-    const conn = new Redis(redisUrl!, { maxRetriesPerRequest: null });
-    await conn.flushdb();
-    const q = createQueue(conn);
-    const calls: string[] = [];
-    const { Worker } = await import("bullmq");
-    const w = new Worker("quietgrowth-jobs", async (job) => { calls.push(`${job.name}:${job.data.orgId}`); }, { connection: new Redis(redisUrl!, { maxRetriesPerRequest: null }) });
-    await enqueueTick(q, ["o1", "o2"], "b1");
-    await enqueueTick(q, ["o1", "o2"], "b1"); // same bucket: deduped by jobId
-    await new Promise<void>((resolve) => { const t = setInterval(() => { if (calls.length >= 12) { clearInterval(t); resolve(); } }, 50); setTimeout(() => { clearInterval(t); resolve(); }, 5000); });
-    await new Promise((r) => setTimeout(r, 300));
-    expect(calls).toHaveLength(12);
-    expect(new Set(calls).size).toBe(12);
-    await w.close(); await q.close(); await conn.quit();
-  });
-  it("handlerFor maps every job name to a handler", () => {
+describe("job registry", () => {
+  it("maps every job name to a handler", () => {
     expect(Object.keys(handlerFor({} as WorkerDeps)).sort()).toEqual(["detect_and_propose", "evaluate_due", "evaluate_experiments", "execute_ready", "lifecycle_tick", "reconcile_billing"]);
   });
 });

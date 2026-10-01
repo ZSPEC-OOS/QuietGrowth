@@ -11,7 +11,8 @@ Browser ──► Next.js (apps/web) ─┬─ pages / server components / serve
 - The Fastify app (`@quietgrowth/api`) is created once per warm instance (`createProductionApp`) and called with `inject`: no network hop between UI and API, one DB pool, one set of env vars.
 - The public API keeps its paths, now prefixed: `https://<app>/api/healthz`, `/api/v1/events`, `/api/internal/tools/:tool`, `/api/cron/tick`. Point the SDK at `https://<app>/api` and tenant cells' `controlPlaneUrl` at the same.
 - Setting `API_URL` makes the web app call a remote API instead (split deployment). Leave it unset for the single deployment.
-- Not on Vercel: `apps/admin`, OpenClaw tenant cells and the BullMQ worker (`apps/worker`). They need a container host and are optional. Without them you get the **self-host/BYOK "light" mode**: funnel, SEO/lifecycle/experiment proposals with rule-based drafting, no agent runtime (`RUNTIME_ATTESTED=1`).
+- Also served from this one app: the admin surface at `/api/admin/*` (token-gated; cross-tenant queries need `ADMIN_DATABASE_URL`, a login role in `qg_admin`) and the cron tick. There is no separate worker or admin deployment.
+- Not on Vercel: OpenClaw tenant cells (they need a Docker host; cell endpoints answer `503 runtime_unavailable` here). Without them you get the **self-host/BYOK "light" mode**: funnel, SEO/lifecycle/experiment proposals with rule-based drafting, no agent runtime (`RUNTIME_ATTESTED=1`).
 
 ## 1. Database
 1. Create a Postgres database (Neon / Vercel Postgres / any managed). Keep **two** URLs: pooled → `DATABASE_URL`, direct → `DATABASE_URL_UNPOOLED`.
@@ -34,12 +35,13 @@ Browser ──► Next.js (apps/web) ─┬─ pages / server components / serve
 | `CRON_SECRET` | yes | ≥ 24 chars. Vercel sends it as `Authorization: Bearer …` to cron routes |
 | `RUN_MIGRATIONS` | optional | `1` = run migrations during the **production** build |
 | `RUNTIME_ATTESTED` | optional | `1` for light mode without tenant cells |
+| `ADMIN_TOKEN`, `ADMIN_DATABASE_URL` | optional | enable `/api/admin/*`; both required, token ≥ 24 chars |
 | `PG_POOL_MAX`, `TICK_BUDGET_MS`, `QG_LOG` | optional | defaults 3, 45000, on |
 
 Without the required secrets the deployment fails closed: `/api/*` answers `503 {"error":"service_unavailable"}` and the real reason appears only in function logs.
 
 ## 3. Cron tick
-`/api/cron/tick` runs the same idempotent handlers as the BullMQ worker (reconcile billing, detect/propose, lifecycle, execute, experiments, evaluate) for every active tenant, stopping at `TICK_BUDGET_MS` (function limit 60 s) and resuming on the next tick. Sub-daily schedules need a Pro plan; on Hobby use a daily cron or an external scheduler calling the endpoint with the bearer secret. Move to the container worker when tenant count outgrows one tick.
+`/api/cron/tick` runs the background jobs in `packages/worker` (reconcile billing, detect/propose, lifecycle, execute, experiments, evaluate) for every active tenant, stopping at `TICK_BUDGET_MS` (function limit 60 s) and resuming on the next tick. Sub-daily schedules need a Pro plan; on Hobby use a daily cron or an external scheduler calling the endpoint with the bearer secret. If tenant count outgrows one tick, shorten the schedule or add a queue-based runner behind the same `runTick` handlers.
 
 ## 4. Verify
 Local, production-mode check of exactly this topology (one Next.js process, real Postgres, headless Chromium; also boots a deliberately misconfigured instance and expects the 503):
