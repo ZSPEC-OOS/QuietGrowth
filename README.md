@@ -4,7 +4,7 @@ Autonomous SaaS growth operations: observe the funnel, rank evidence-backed oppo
 
 - Product reference: the *QuietGrowth SaaS Master Reference* ("MR", section numbers are cited throughout the code and docs)
 - Plan and status: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), [docs/STATUS.md](docs/STATUS.md)
-- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Security: [docs/SECURITY.md](docs/SECURITY.md) · Operations: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/RUNBOOKS.md](docs/RUNBOOKS.md)
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Security: [docs/SECURITY.md](docs/SECURITY.md) · Operations: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/VERCEL.md](docs/VERCEL.md), [docs/RUNBOOKS.md](docs/RUNBOOKS.md)
 
 ## Quick start (development)
 

@@ -38,6 +38,9 @@ Verified in the authoring environment: `pnpm check` (typecheck + **345 tests**, 
 3. **Docker images** are not built here (no Docker daemon); `docker compose config` validates the compose file only.
 4. Stripe/GSC/GA4/GitHub request shapes follow public API documentation and are tested only with fakes; run each against sandbox accounts.
 
+## Vercel readiness
+Web (Next.js) and API (Fastify, Build Output API bundle) have Vercel configuration, a queue-free cron tick replaces the BullMQ worker, and a smoke test loads the built function as the launcher would. **No real Vercel deployment was performed**; see docs/VERCEL.md for the first-deploy checks.
+
 ## Not implemented (explicit)
 OAuth connect flows; scheduled post-merge live verification; ad/Google Ads client; helpdesk connector (P2); object storage use (MinIO is provisioned but unused); OpenTelemetry/error-tracker wiring (env vars reserved); session revocation, login rate limiting and master-key rotation (see SECURITY.md); QuietGrowth's own billing for hosted plans.
 
