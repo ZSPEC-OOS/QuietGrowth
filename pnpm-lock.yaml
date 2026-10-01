@@ -27,6 +27,8 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
 
+  packages/context-compiler: {}
+
   packages/cost-engine: {}
 
   packages/database:
@@ -41,6 +43,10 @@ importers:
 
   packages/domain: {}
 
+  packages/experiments: {}
+
+  packages/metrics: {}
+
   packages/policy-engine:
     dependencies:
       '@quietgrowth/domain':
@@ -53,7 +59,11 @@ importers:
         specifier: workspace:*
         version: link:../agent-contracts
 
+  packages/saas-profile: {}
+
   packages/secrets: {}
+
+  packages/verification: {}
 
 packages:
 
