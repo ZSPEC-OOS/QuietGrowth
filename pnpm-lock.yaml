@@ -21,6 +21,33 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.4)
 
+  packages/acquisition:
+    dependencies:
+      '@quietgrowth/connector-cms':
+        specifier: workspace:*
+        version: link:../connector-cms
+      '@quietgrowth/connector-gsc':
+        specifier: workspace:*
+        version: link:../connector-gsc
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@quietgrowth/growth-engine':
+        specifier: workspace:*
+        version: link:../growth-engine
+      '@quietgrowth/metrics':
+        specifier: workspace:*
+        version: link:../metrics
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+      '@quietgrowth/verification':
+        specifier: workspace:*
+        version: link:../verification
+
   packages/agent-contracts:
     dependencies:
       zod:
