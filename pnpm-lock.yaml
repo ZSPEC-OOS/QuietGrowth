@@ -27,6 +27,85 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
 
+  packages/connector-billing:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
+  packages/connector-cms:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
+  packages/connector-email:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
+  packages/connector-feature-flags:
+    dependencies:
+      '@quietgrowth/experiments':
+        specifier: workspace:*
+        version: link:../experiments
+
+  packages/connector-ga4:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
+  packages/connector-google-ads:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
+  packages/connector-gsc:
+    dependencies:
+      '@quietgrowth/connectors-core':
+        specifier: workspace:*
+        version: link:../connectors-core
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
+  packages/connector-product-events:
+    dependencies:
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.1
+    devDependencies:
+      '@quietgrowth/database':
+        specifier: workspace:*
+        version: link:../database
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
+  packages/connectors-core:
+    dependencies:
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
+
   packages/context-compiler: {}
 
   packages/cost-engine: {}
@@ -60,6 +139,8 @@ importers:
         version: link:../agent-contracts
 
   packages/saas-profile: {}
+
+  packages/sdk: {}
 
   packages/secrets: {}
 

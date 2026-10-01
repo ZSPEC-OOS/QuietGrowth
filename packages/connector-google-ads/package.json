@@ -1,0 +1,17 @@
+{
+  "name": "@quietgrowth/connector-google-ads",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@quietgrowth/connectors-core": "workspace:*",
+    "@quietgrowth/policy-engine": "workspace:*"
+  }
+}
