@@ -3,3 +3,4 @@ packages:
   - "packages/*"
   - "openclaw/plugins/*"
   - "openclaw/evals"
+  - "tests/e2e"

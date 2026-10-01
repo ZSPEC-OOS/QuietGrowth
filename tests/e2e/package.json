@@ -1,0 +1,8 @@
+{
+  "name": "@quietgrowth/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "e2e": "node run.mjs" },
+  "dependencies": { "playwright-core": "^1.48.0", "pg": "^8.13.0" }
+}
