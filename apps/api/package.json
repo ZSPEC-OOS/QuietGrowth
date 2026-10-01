@@ -8,7 +8,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "build:vercel": "node scripts/build-vercel.mjs"
   },
   "dependencies": {
     "fastify": "^5.0.0",
@@ -29,9 +30,14 @@
     "@quietgrowth/connectors-core": "workspace:*",
     "@quietgrowth/runtime-manager": "workspace:*",
     "@quietgrowth/entitlements": "workspace:*",
-    "@quietgrowth/deepseek-client": "workspace:*"
+    "@quietgrowth/deepseek-client": "workspace:*",
+    "@quietgrowth/worker": "workspace:*"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "esbuild": "^0.24.0"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

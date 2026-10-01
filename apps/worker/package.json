@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -38,5 +38,6 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"
-  }
+  },
+  "types": "dist/index.d.ts"
 }

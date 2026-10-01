@@ -7,6 +7,7 @@ import { ingestEvents } from "@quietgrowth/connector-product-events";
 import { InMemoryIdempotencyStore, signAuthorization } from "@quietgrowth/policy-engine";
 import { EmailConnector } from "@quietgrowth/connector-email";
 import type { HttpClient, WriteReceipt } from "@quietgrowth/connectors-core";
+import { runTick, TICK_JOBS } from "./tick.js";
 import { CompositeExecutor, CompositeVerifier, LifecycleExecutor, LifecycleVerifier, buildSources, evaluateExperiments, handlerFor, lifecycleTick, scopeFor, type WorkerDeps } from "./index.js";
 
 const url = process.env.DATABASE_URL;
@@ -121,6 +122,13 @@ describe.skipIf(!url)("experiments, lifecycle, sources, suspension", () => {
     expect(seen.filter((s) => s.includes("stripe.com"))).toHaveLength(1);
   });
 
+  it("runs real handlers for active tenants and skips suspended ones", async () => {
+    const org = await mkOrg("TICK"); const sus = await mkOrg("TICKSUS");
+    await pool.query("INSERT INTO subscriptions (organization_id, tier, status) VALUES ($1,'growth','suspended')", [sus]);
+    const r = await runTick(base(), [org, sus], 60_000);
+    expect(r.errors).toEqual([]); expect(r.jobsRun).toBe(2 * TICK_JOBS.length);
+  });
+
   it("suspended tenants receive no background work; reinstating resumes", async () => {
     const org = await mkOrg("SUS");
     await pool.query("INSERT INTO subscriptions (organization_id, tier, status) VALUES ($1,'growth','suspended')", [org]);
@@ -129,5 +137,18 @@ describe.skipIf(!url)("experiments, lifecycle, sources, suspension", () => {
     expect(await h.execute_ready(org)).toEqual({ skipped: "tenant_suspended" });
     await pool.query("UPDATE subscriptions SET status='active' WHERE organization_id=$1", [org]);
     expect(await h.evaluate_due(org)).toEqual({ evaluated: 0 });
+  });
+});
+
+
+describe("runTick (serverless, queue-free)", () => {
+  const fakeDeps = (calls: string[]) => ({ pool: { connect: async () => { throw new Error("db down"); } } } as unknown as WorkerDeps);
+  it("isolates per-job failures, reports them, and keeps going", async () => {
+    const r = await runTick(fakeDeps([]), ["o1", "o2"], 60_000);
+    expect(r.orgs).toBe(2); expect(r.jobsRun).toBe(0); expect(r.errors).toHaveLength(2 * TICK_JOBS.length); expect(r.truncated).toBe(false);
+  });
+  it("stops starting new work when the time budget is spent", async () => {
+    let t = 0; const r = await runTick(fakeDeps([]), ["o1", "o2", "o3"], 5, () => (t += 3));
+    expect(r.truncated).toBe(true); expect(r.orgs).toBeLessThan(3);
   });
 });

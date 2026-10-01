@@ -6,3 +6,5 @@ export * from "./experiments.js";
 export * from "./lifecycle.js";
 export * from "./executors.js";
 export * from "./sources.js";
+export * from "./wiring.js";
+export * from "./tick.js";
