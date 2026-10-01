@@ -1,0 +1,12 @@
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_PASSWORD: quietgrowth, POSTGRES_DB: quietgrowth }
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports: ["9000:9000", "9001:9001"]

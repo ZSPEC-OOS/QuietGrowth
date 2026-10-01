@@ -55,7 +55,7 @@ Sizing: S ≤ 2 days, M ≈ 3–5 days, L ≈ 1–2 weeks (single engineer). Eac
 
 | ID | Work package | Size | AC |
 |---|---|---|---|
-| M0.1 | Monorepo, lint/format/typecheck, CI (`.github/workflows`), Docker Compose (Postgres, Redis, MinIO) | M | `pnpm ci` green on clean clone; boundaries lint active |
+| M0.1 | Monorepo, lint/format/typecheck, CI (`.github/workflows`), Docker Compose (Postgres, Redis, MinIO) | M | `pnpm check` green on clean clone; boundaries lint active |
 | M0.2 | `database` package: migrations framework, base schema for **Identity** domain (organizations, users, organization_members), RLS helper | M | cross-org read blocked in an integration test |
 | M0.3 | `api` skeleton: auth, org context, `/healthz`, OTel traces, request-scoped org binding | M | authenticated request sets `app.org_id`; unauthenticated denied |
 | M0.4 | `SecretStore` interface + local encrypted implementation; credential_references table | S | secrets never returned by any API; log redaction test |
