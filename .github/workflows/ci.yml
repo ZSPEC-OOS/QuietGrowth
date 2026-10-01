@@ -7,6 +7,9 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
       postgres:
         image: postgres:16
         env: { POSTGRES_PASSWORD: quietgrowth, POSTGRES_DB: quietgrowth }
@@ -14,6 +17,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=10
     env:
+      REDIS_URL: redis://localhost:6379
       DATABASE_URL: postgres://postgres:quietgrowth@localhost:5432/quietgrowth
     steps:
       - uses: actions/checkout@v4

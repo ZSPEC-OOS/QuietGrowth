@@ -1,0 +1,38 @@
+{
+  "name": "@quietgrowth/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.20.0",
+    "ioredis": "^5.4.0",
+    "pg": "^8.13.0",
+    "@quietgrowth/domain": "workspace:*",
+    "@quietgrowth/policy-engine": "workspace:*",
+    "@quietgrowth/growth-engine": "workspace:*",
+    "@quietgrowth/database": "workspace:*",
+    "@quietgrowth/metrics": "workspace:*",
+    "@quietgrowth/connector-product-events": "workspace:*",
+    "@quietgrowth/connector-gsc": "workspace:*",
+    "@quietgrowth/connector-billing": "workspace:*",
+    "@quietgrowth/connector-email": "workspace:*",
+    "@quietgrowth/opportunity-detectors": "workspace:*",
+    "@quietgrowth/acquisition": "workspace:*",
+    "@quietgrowth/cost-engine": "workspace:*",
+    "@quietgrowth/agent-contracts": "workspace:*",
+    "@quietgrowth/runtime-manager": "workspace:*",
+    "@quietgrowth/connectors-core": "workspace:*",
+    "@quietgrowth/verification": "workspace:*",
+    "@quietgrowth/connector-cms": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}
