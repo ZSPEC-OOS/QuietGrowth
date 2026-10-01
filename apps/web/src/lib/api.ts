@@ -1,7 +1,8 @@
+import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { backend } from "@/server/backend";
 
-export const API_URL = process.env.API_URL ?? "http://127.0.0.1:3001";
 export const COOKIE = "qg_session";
 
 export class ApiError extends Error { constructor(readonly status: number, message: string, readonly body?: unknown) { super(message); } }
@@ -12,11 +13,11 @@ async function token(): Promise<string | undefined> { return (await cookies()).g
 export async function api<T>(path: string, init: { method?: "GET" | "POST"; body?: unknown } = {}): Promise<T> {
   const t = await token();
   if (!t) redirect("/login");
-  const res = await fetch(`${API_URL}${path}`, { method: init.method ?? "GET", headers: { authorization: `Bearer ${t}`, "content-type": "application/json" }, body: init.body === undefined ? undefined : JSON.stringify(init.body), cache: "no-store" });
+  const res = await backend({ method: init.method ?? "GET", path, headers: { authorization: `Bearer ${t}`, "content-type": "application/json" }, body: init.body === undefined ? undefined : JSON.stringify(init.body) });
   if (res.status === 401) redirect("/login");
-  const text = await res.text();
-  const json = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, (json as { error?: string; message?: string })?.message ?? (json as { error?: string })?.error ?? `API ${res.status}`, json);
+  const json = res.text ? JSON.parse(res.text) : null;
+  const ok = res.status >= 200 && res.status < 300;
+  if (!ok) throw new ApiError(res.status, (json as { error?: string; message?: string })?.message ?? (json as { error?: string })?.error ?? `API ${res.status}`, json);
   return json as T;
 }
 

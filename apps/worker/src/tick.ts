@@ -1,4 +1,4 @@
-import { handlerFor, type JobName } from "./queue.js";
+import { handlerFor, type JobName } from "./jobs.js";
 import type { WorkerDeps } from "./ports.js";
 
 export const TICK_JOBS: JobName[] = ["reconcile_billing", "detect_and_propose", "lifecycle_tick", "execute_ready", "evaluate_experiments", "evaluate_due"];
