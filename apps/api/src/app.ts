@@ -10,6 +10,8 @@ import { ingestEvents, resolvedEvents } from "@quietgrowth/connector-product-eve
 import { GrowthEngine, PgActionStore, EngineError, type ActionRecord, type Executor, type OutcomeEvaluator, type Verifier } from "@quietgrowth/growth-engine";
 import { ZERO_SPEND_POLICY, ACTION_TYPES, type Policy } from "@quietgrowth/policy-engine";
 import { validateSpec, type ExperimentSpec } from "@quietgrowth/experiments";
+import { runTool } from "./tools.js";
+import { ToolDeniedError } from "@quietgrowth/runtime-manager";
 import { hashApiKey, hashPassword, newApiKey, signSession, verifyPassword, verifySession, type Role, type Session } from "./auth.js";
 
 export interface AppDeps {
@@ -51,6 +53,7 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
   app.setErrorHandler((err: Error, _req, reply) => {
     if (err instanceof z.ZodError) return reply.code(400).send({ error: "invalid_request", issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
     if (err instanceof EngineError) return reply.code(409).send({ error: "conflict", message: err.message });
+    if (err instanceof ToolDeniedError) return reply.code(403).send({ error: "tool_denied", message: err.message });
     if (err instanceof UnsafeUrlError) return reply.code(422).send({ error: "unsafe_url", message: err.message });
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: err.message });
@@ -82,7 +85,6 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     store: new PgActionStore(c), authSecret: d.authSecret, now, scopeFor: d.scopeFor,
     policies: { current: (o) => currentPolicy(c, o) }, executor: d.executor, verifier: d.verifier, outcomes: d.outcomes,
   });
-  void engineFor;
 
   // ---- public ----
   app.get("/healthz", async () => ({ ok: true }));
@@ -216,6 +218,33 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     return tenant(s, async (c) => ({ opportunities: (await c.query("SELECT id, domain, funnel_stage, kind, score, status, evidence_json FROM opportunities WHERE organization_id=$1 ORDER BY score DESC NULLS LAST LIMIT 100", [s.orgId])).rows }));
   });
 
+  app.get("/v1/actions", async (req) => {
+    const s = await requireSession(req);
+    const q = z.object({ status: z.string().optional(), limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query);
+    return tenant(s, async (c) => ({ actions: (await c.query(
+      `SELECT id, domain, type, target_metric, rationale, status, requires_approval, risk_level, estimated_external_cost_usd, estimated_model_cost_usd, created_at
+         FROM actions WHERE organization_id=$1 AND ($2::text IS NULL OR status=$2) ORDER BY created_at DESC LIMIT $3`, [s.orgId, q.status ?? null, q.limit])).rows }));
+  });
+
+  app.get("/v1/experiments", async (req) => {
+    const s = await requireSession(req);
+    return tenant(s, async (c) => ({ experiments: (await c.query("SELECT id, hypothesis, status, decision, start_at, end_at FROM experiments WHERE organization_id=$1 ORDER BY start_at DESC NULLS LAST, id DESC LIMIT 100", [s.orgId])).rows }));
+  });
+
+  app.get("/v1/product", async (req) => {
+    const s = await requireSession(req);
+    return tenant(s, async (c) => {
+      const p = (await c.query("SELECT p.id, p.name, p.primary_url, p.mode, pp.profile, pp.status AS profile_status FROM products p LEFT JOIN LATERAL (SELECT profile, status FROM product_profiles WHERE product_id=p.id ORDER BY version DESC LIMIT 1) pp ON true WHERE p.organization_id=$1 ORDER BY p.created_at LIMIT 1", [s.orgId])).rows[0] ?? null;
+      const f = await loadFunnel(c, s.orgId);
+      return { product: p, funnelDefinition: f.definition, completeness: f.completeness };
+    });
+  });
+
+  app.get("/v1/autopilot/policy", async (req) => {
+    const s = await requireSession(req);
+    return tenant(s, async (c) => ({ policy: await currentPolicy(c, s.orgId) }));
+  });
+
   app.get("/v1/model-cost", async (req) => {
     const s = await requireSession(req);
     return tenant(s, async (c) => {
@@ -320,6 +349,14 @@ export async function buildApp(d: AppDeps): Promise<FastifyInstance> {
     await withOrg(d.pool, b.orgId, (c) => c.query("INSERT INTO audit_logs (organization_id, actor, event, subject_type, subject_id, detail) VALUES ($1,'openclaw',$2,'action',$3,$4)", [b.orgId, b.type, b.actionId ?? null, redact(b.payload)]));
     return reply.code(202).send({ ok: true });
   });
+  app.post("/internal/tools/:tool", async (req, reply) => {
+    requireInternal(req);
+    const { tool } = z.object({ tool: z.string().max(60) }).parse(req.params);
+    const b = z.object({ orgId: z.string().uuid(), contract: z.unknown(), args: z.record(z.unknown()).default({}), callId: z.string().min(1).max(100) }).parse(req.body);
+    const r = await withOrg(d.pool, b.orgId, (c) => runTool(b.contract, { callId: b.callId, tool, args: b.args }, { c, engine: engineFor(c, b.orgId), orgId: b.orgId, now }));
+    return reply.code(r.status).send({ callId: b.callId, ok: r.ok, data: r.data, error: r.error });
+  });
+
   app.post("/internal/verify/:actionId", async (req) => {
     requireInternal(req);
     const { actionId } = z.object({ actionId: z.string().uuid() }).parse(req.params);

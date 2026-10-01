@@ -53,6 +53,9 @@ importers:
       '@quietgrowth/policy-engine':
         specifier: workspace:*
         version: link:../../packages/policy-engine
+      '@quietgrowth/runtime-manager':
+        specifier: workspace:*
+        version: link:../../packages/runtime-manager
       '@quietgrowth/saas-profile':
         specifier: workspace:*
         version: link:../../packages/saas-profile
@@ -143,6 +146,42 @@ importers:
         specifier: ^8.11.0
         version: 8.23.1
 
+  openclaw/evals:
+    dependencies:
+      '@quietgrowth/acquisition':
+        specifier: workspace:*
+        version: link:../../packages/acquisition
+      '@quietgrowth/agent-contracts':
+        specifier: workspace:*
+        version: link:../../packages/agent-contracts
+      '@quietgrowth/connector-email':
+        specifier: workspace:*
+        version: link:../../packages/connector-email
+      '@quietgrowth/experiments':
+        specifier: workspace:*
+        version: link:../../packages/experiments
+      '@quietgrowth/growth-engine':
+        specifier: workspace:*
+        version: link:../../packages/growth-engine
+      '@quietgrowth/metrics':
+        specifier: workspace:*
+        version: link:../../packages/metrics
+      '@quietgrowth/opportunity-detectors':
+        specifier: workspace:*
+        version: link:../../packages/opportunity-detectors
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
+      '@quietgrowth/runtime-manager':
+        specifier: workspace:*
+        version: link:../../packages/runtime-manager
+
+  openclaw/plugins/quietgrowth-tools:
+    dependencies:
+      '@quietgrowth/agent-contracts':
+        specifier: workspace:*
+        version: link:../../../packages/agent-contracts
+
   packages/acquisition:
     dependencies:
       '@quietgrowth/connector-cms':
@@ -175,6 +214,15 @@ importers:
       zod:
         specifier: ^3.23.8
         version: 3.25.76
+
+  packages/cell-manager:
+    dependencies:
+      '@quietgrowth/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@quietgrowth/policy-engine':
+        specifier: workspace:*
+        version: link:../policy-engine
 
   packages/connector-billing:
     dependencies:
@@ -302,6 +350,18 @@ importers:
         version: 8.23.1
 
   packages/metrics: {}
+
+  packages/openclaw-client:
+    dependencies:
+      '@quietgrowth/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@quietgrowth/cell-manager':
+        specifier: workspace:*
+        version: link:../cell-manager
+      '@quietgrowth/runtime-manager':
+        specifier: workspace:*
+        version: link:../runtime-manager
 
   packages/opportunity-detectors:
     dependencies:

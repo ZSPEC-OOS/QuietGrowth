@@ -26,7 +26,8 @@
     "@quietgrowth/experiments": "workspace:*",
     "@quietgrowth/agent-contracts": "workspace:*",
     "@quietgrowth/verification": "workspace:*",
-    "@quietgrowth/connectors-core": "workspace:*"
+    "@quietgrowth/connectors-core": "workspace:*",
+    "@quietgrowth/runtime-manager": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"
