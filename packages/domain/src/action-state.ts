@@ -13,7 +13,7 @@ export const TRANSITIONS: Readonly<Record<ActionState, readonly ActionState[]>> 
   PROPOSED: ["POLICY_CHECK"],
   POLICY_CHECK: ["BLOCKED", "NEEDS_APPROVAL", "AUTO_APPROVED"],
   BLOCKED: [],
-  NEEDS_APPROVAL: ["APPROVED"],
+  NEEDS_APPROVAL: ["APPROVED", "BLOCKED"], // BLOCKED here = owner rejection (extension of MR §8.2; POST /v1/actions/:id/reject)
   APPROVED: ["QUEUED"],
   AUTO_APPROVED: ["QUEUED"],
   QUEUED: ["RUNNING"],
