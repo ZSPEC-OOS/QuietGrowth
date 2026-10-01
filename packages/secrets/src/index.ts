@@ -9,16 +9,29 @@ export interface SecretStore {
 
 export class SecretNotFoundError extends Error {}
 
-interface Sealed { orgId: string; iv: string; tag: string; data: string }
+export interface Sealed { orgId: string; iv: string; tag: string; data: string }
+
+/** Persistence for sealed blobs. Implementations never see plaintext. */
+export interface SealedBacking {
+  get(orgId: string, ref: string): Promise<Sealed | undefined>;
+  set(orgId: string, ref: string, s: Sealed): Promise<void>;
+  delete(orgId: string, ref: string): Promise<void>;
+}
+
+export class MapBacking implements SealedBacking {
+  readonly raw = new Map<string, Sealed>();
+  async get(_o: string, ref: string) { return this.raw.get(ref); }
+  async set(_o: string, ref: string, s: Sealed) { this.raw.set(ref, s); }
+  async delete(orgId: string, ref: string) { if (this.raw.get(ref)?.orgId === orgId) this.raw.delete(ref); }
+}
 
 /**
- * Local encrypted store (self-hosted mode). AES-256-GCM; the org id is bound as AAD,
- * so a ref cannot be decrypted under a different organization.
- * Persistence is injectable; default is in-memory.
+ * Local encrypted store. AES-256-GCM; the org id is bound as AAD, so a ref cannot be decrypted
+ * under a different organization even if the stored row were moved.
  */
 export class LocalEncryptedSecretStore implements SecretStore {
   private readonly key: Buffer;
-  constructor(masterKey: string | Buffer, private readonly backing: Map<string, Sealed> = new Map()) {
+  constructor(masterKey: string | Buffer, private readonly backing: SealedBacking = new MapBacking()) {
     const key = typeof masterKey === "string" ? Buffer.from(masterKey, "base64") : masterKey;
     if (key.length !== 32) throw new Error("master key must be 32 bytes");
     this.key = key;
@@ -31,11 +44,11 @@ export class LocalEncryptedSecretStore implements SecretStore {
     const c = createCipheriv("aes-256-gcm", this.key, iv);
     c.setAAD(Buffer.from(orgId));
     const data = Buffer.concat([c.update(value, "utf8"), c.final()]);
-    this.backing.set(ref, { orgId, iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), data: data.toString("base64") });
+    await this.backing.set(orgId, ref, { orgId, iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), data: data.toString("base64") });
     return ref;
   }
   async get(orgId: string, ref: string): Promise<string> {
-    const s = this.backing.get(ref);
+    const s = await this.backing.get(orgId, ref);
     // Same error for missing and cross-org refs: no existence oracle.
     if (!s || s.orgId !== orgId) throw new SecretNotFoundError("secret not found");
     const d = createDecipheriv("aes-256-gcm", this.key, Buffer.from(s.iv, "base64"));
@@ -43,10 +56,7 @@ export class LocalEncryptedSecretStore implements SecretStore {
     d.setAuthTag(Buffer.from(s.tag, "base64"));
     return Buffer.concat([d.update(Buffer.from(s.data, "base64")), d.final()]).toString("utf8");
   }
-  async delete(orgId: string, ref: string): Promise<void> {
-    const s = this.backing.get(ref);
-    if (s && s.orgId === orgId) this.backing.delete(ref);
-  }
+  async delete(orgId: string, ref: string): Promise<void> { await this.backing.delete(orgId, ref); }
 }
 
 const SECRET_PATTERNS: RegExp[] = [
@@ -71,3 +81,4 @@ export function redact<T>(value: T): T {
   };
   return walk(value, 0) as T;
 }
+export { PgBacking } from "./pg-backing.js";

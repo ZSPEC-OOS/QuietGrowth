@@ -137,13 +137,13 @@ describe.skipIf(!redisUrl)("BullMQ wiring (redis)", () => {
     const w = new Worker("quietgrowth-jobs", async (job) => { calls.push(`${job.name}:${job.data.orgId}`); }, { connection: new Redis(redisUrl!, { maxRetriesPerRequest: null }) });
     await enqueueTick(q, ["o1", "o2"], "b1");
     await enqueueTick(q, ["o1", "o2"], "b1"); // same bucket: deduped by jobId
-    await new Promise<void>((resolve) => { const t = setInterval(() => { if (calls.length >= 8) { clearInterval(t); resolve(); } }, 50); setTimeout(() => { clearInterval(t); resolve(); }, 5000); });
+    await new Promise<void>((resolve) => { const t = setInterval(() => { if (calls.length >= 12) { clearInterval(t); resolve(); } }, 50); setTimeout(() => { clearInterval(t); resolve(); }, 5000); });
     await new Promise((r) => setTimeout(r, 300));
-    expect(calls).toHaveLength(8);
-    expect(new Set(calls).size).toBe(8);
+    expect(calls).toHaveLength(12);
+    expect(new Set(calls).size).toBe(12);
     await w.close(); await q.close(); await conn.quit();
   });
   it("handlerFor maps every job name to a handler", () => {
-    expect(Object.keys(handlerFor({} as WorkerDeps)).sort()).toEqual(["detect_and_propose", "evaluate_due", "execute_ready", "reconcile_billing"]);
+    expect(Object.keys(handlerFor({} as WorkerDeps)).sort()).toEqual(["detect_and_propose", "evaluate_due", "evaluate_experiments", "execute_ready", "lifecycle_tick", "reconcile_billing"]);
   });
 });

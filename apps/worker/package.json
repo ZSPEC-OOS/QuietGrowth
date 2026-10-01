@@ -30,7 +30,11 @@
     "@quietgrowth/runtime-manager": "workspace:*",
     "@quietgrowth/connectors-core": "workspace:*",
     "@quietgrowth/verification": "workspace:*",
-    "@quietgrowth/connector-cms": "workspace:*"
+    "@quietgrowth/connector-cms": "workspace:*",
+    "@quietgrowth/experiments": "workspace:*",
+    "@quietgrowth/secrets": "workspace:*",
+    "@quietgrowth/connector-ga4": "workspace:*",
+    "@quietgrowth/entitlements": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

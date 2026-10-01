@@ -21,6 +21,28 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.4)
 
+  apps/admin:
+    dependencies:
+      '@quietgrowth/cell-manager':
+        specifier: workspace:*
+        version: link:../../packages/cell-manager
+      fastify:
+        specifier: ^5.0.0
+        version: 5.12.5
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.1
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@quietgrowth/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+
   apps/api:
     dependencies:
       '@quietgrowth/agent-contracts':
@@ -127,6 +149,9 @@ importers:
       '@quietgrowth/connector-email':
         specifier: workspace:*
         version: link:../../packages/connector-email
+      '@quietgrowth/connector-ga4':
+        specifier: workspace:*
+        version: link:../../packages/connector-ga4
       '@quietgrowth/connector-gsc':
         specifier: workspace:*
         version: link:../../packages/connector-gsc
@@ -145,6 +170,12 @@ importers:
       '@quietgrowth/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@quietgrowth/entitlements':
+        specifier: workspace:*
+        version: link:../../packages/entitlements
+      '@quietgrowth/experiments':
+        specifier: workspace:*
+        version: link:../../packages/experiments
       '@quietgrowth/growth-engine':
         specifier: workspace:*
         version: link:../../packages/growth-engine
@@ -160,6 +191,9 @@ importers:
       '@quietgrowth/runtime-manager':
         specifier: workspace:*
         version: link:../../packages/runtime-manager
+      '@quietgrowth/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       '@quietgrowth/verification':
         specifier: workspace:*
         version: link:../../packages/verification
@@ -421,7 +455,18 @@ importers:
 
   packages/sdk: {}
 
-  packages/secrets: {}
+  packages/secrets:
+    dependencies:
+      '@quietgrowth/database':
+        specifier: workspace:*
+        version: link:../database
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
 
   packages/verification: {}
 
